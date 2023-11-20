@@ -337,3 +337,28 @@ pub enum TokenKind {
 
     Eof,
 }
+
+impl TokenKind {
+    pub fn is_expr_start(self) -> bool {
+        matches!(
+            self,
+            TokenKind::Int
+                | TokenKind::Char
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::Null
+                | TokenKind::String
+                | TokenKind::Name
+                | TokenKind::LeftBrace
+                | TokenKind::LeftParen
+                | TokenKind::If
+                | TokenKind::Return
+                | TokenKind::For
+                | TokenKind::Dash
+                | TokenKind::Tilde
+                | TokenKind::Bang
+                | TokenKind::Star
+                | TokenKind::And
+        )
+    }
+}
