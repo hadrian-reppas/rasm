@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::error::Error;
 use crate::{ast, resolved};
@@ -105,6 +105,8 @@ struct Resolver<'a> {
     current_stack_locals: u32,
     max_stack_locals: u32,
     transient_map: HashMap<LocalId, TransientId>,
+    global_dependencies: HashSet<GlobalId>,
+    function_dependencies: HashSet<FunctionId>,
 }
 
 impl<'a> Resolver<'a> {
@@ -121,6 +123,8 @@ impl<'a> Resolver<'a> {
             current_stack_locals: 0,
             max_stack_locals: 0,
             transient_map: HashMap::new(),
+            global_dependencies: HashSet::new(),
+            function_dependencies: HashSet::new(),
         }
     }
 
@@ -151,6 +155,8 @@ impl<'a> Resolver<'a> {
             current_stack_locals: 0,
             max_stack_locals: 0,
             transient_map: HashMap::new(),
+            global_dependencies: HashSet::new(),
+            function_dependencies: HashSet::new(),
         })
     }
 
@@ -169,7 +175,7 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn resolve(&self, name: &ast::Name) -> Result<Variable, Error> {
+    fn resolve(&mut self, name: &ast::Name) -> Result<Variable, Error> {
         for frame in self.variable_stack.iter().rev() {
             if let Some(id) = frame.get(&name.name) {
                 return Ok(Variable::Local(*id));
@@ -177,8 +183,10 @@ impl<'a> Resolver<'a> {
         }
 
         if let Some(global_id) = self.globals.get(&name.name) {
+            self.global_dependencies.insert(*global_id);
             Ok(Variable::Global(*global_id))
         } else if let Some(function_id) = self.functions.get(&name.name) {
+            self.function_dependencies.insert(*function_id);
             Ok(Variable::Function(*function_id))
         } else {
             Err(Error {
@@ -333,7 +341,7 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn visit_name(&self, name: &mut ast::Name) -> Result<(), Error> {
+    fn visit_name(&mut self, name: &mut ast::Name) -> Result<(), Error> {
         name.variable_id = Some(self.resolve(name)?);
         Ok(())
     }
