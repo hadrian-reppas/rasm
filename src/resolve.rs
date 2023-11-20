@@ -78,6 +78,7 @@ pub fn resolve(
                 id: functions[&name.name],
                 params,
                 block: resolver.convert_block(block)?,
+                transient_locals: resolver.transient_map.len() as u32,
                 stack_locals: resolver.max_stack_locals,
             })
         }
@@ -88,6 +89,7 @@ pub fn resolve(
                 name: name.name.to_string(),
                 id: globals[&name.name],
                 expr: resolver.convert_expr(expr)?,
+                transient_locals: resolver.transient_map.len() as u32,
                 stack_locals: resolver.max_stack_locals,
             })
         }
@@ -526,10 +528,10 @@ impl<'a> Resolver<'a> {
                 }),
                 Variable::Local(id) => match self.convert_local_id(id) {
                     Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
-                    Local::Transient(_) => unreachable!(),
+                    Local::Transient(id) => unreachable!(),
                 },
             },
-            ast::PlaceExpr::Deref(_) => unreachable!(),
+            ast::PlaceExpr::Deref(expr) => unreachable!(),
             ast::PlaceExpr::Index { target, index } => Ok(resolved::AddrOfExpr::Index {
                 target: Box::new(self.convert_expr(*target)?),
                 index: Box::new(self.convert_expr(*index)?),

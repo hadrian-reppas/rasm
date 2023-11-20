@@ -8,12 +8,14 @@ pub enum Item {
         id: FunctionId,
         params: Vec<Local>,
         block: Block,
+        transient_locals: u32,
         stack_locals: u32,
     },
     Global {
         name: String,
         id: GlobalId,
         expr: Expr,
+        transient_locals: u32,
         stack_locals: u32,
     },
 }
