@@ -296,9 +296,8 @@ impl Parser {
                             msg: "cannot take address of deref expression".to_string(),
                             span: and.span,
                         });
-                    } else {
-                        Expr::AddrOf(place)
                     }
+                    Expr::AddrOf(place)
                 } else {
                     return Err(Error {
                         msg: "target is not an lvalue".to_string(),
