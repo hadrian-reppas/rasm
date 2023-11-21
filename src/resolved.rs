@@ -3,25 +3,31 @@ use crate::resolve::{FunctionId, GlobalId, Local, StackId, StringId, TransientId
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    Function {
-        name: String,
-        id: FunctionId,
-        params: Vec<Local>,
-        block: Block,
-        transient_locals: u32,
-        stack_locals: u32,
-        global_dependencies: Vec<GlobalId>,
-        function_dependencies: Vec<FunctionId>,
-    },
-    Global {
-        name: String,
-        id: GlobalId,
-        expr: Expr,
-        transient_locals: u32,
-        stack_locals: u32,
-        global_dependencies: Vec<GlobalId>,
-        function_dependencies: Vec<FunctionId>,
-    },
+    Function(Function),
+    Global(Global),
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub id: FunctionId,
+    pub params: Vec<Local>,
+    pub block: Block,
+    pub transient_locals: u32,
+    pub stack_locals: u32,
+    pub global_dependencies: Vec<GlobalId>,
+    pub function_dependencies: Vec<FunctionId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Global {
+    pub name: String,
+    pub id: GlobalId,
+    pub expr: Expr,
+    pub transient_locals: u32,
+    pub stack_locals: u32,
+    pub global_dependencies: Vec<GlobalId>,
+    pub function_dependencies: Vec<FunctionId>,
 }
 
 #[derive(Debug, Clone)]
