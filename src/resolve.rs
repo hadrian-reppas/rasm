@@ -32,9 +32,9 @@ pub enum Local {
 
 #[derive(Debug, Clone)]
 pub struct Resolved {
-    functions: Vec<resolved::Function>,
-    globals: Vec<resolved::Global>,
-    strings: Vec<String>,
+    pub functions: Vec<resolved::Function>,
+    pub globals: Vec<resolved::Global>,
+    pub strings: Vec<String>,
 }
 
 pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
@@ -107,6 +107,7 @@ fn resolve_item(
                 .collect();
             Ok(resolved::Item::Function(resolved::Function {
                 name: name.name.to_string(),
+                span: name.span,
                 id: functions[&name.name],
                 params,
                 block: resolver.convert_block(block)?,
@@ -121,6 +122,7 @@ fn resolve_item(
             resolver.visit_expr(&mut expr)?;
             Ok(resolved::Item::Global(resolved::Global {
                 name: name.name.to_string(),
+                span: name.span,
                 id: globals[&name.name],
                 expr: resolver.convert_expr(expr)?,
                 transient_locals: resolver.transient_map.len() as u32,

@@ -1,4 +1,5 @@
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
+use crate::error::Span;
 use crate::resolve::{FunctionId, GlobalId, Local, StackId, StringId, TransientId};
 
 #[derive(Debug, Clone)]
@@ -10,6 +11,7 @@ pub enum Item {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
+    pub span: Span,
     pub id: FunctionId,
     pub params: Vec<Local>,
     pub block: Block,
@@ -22,6 +24,7 @@ pub struct Function {
 #[derive(Debug, Clone)]
 pub struct Global {
     pub name: String,
+    pub span: Span,
     pub id: GlobalId,
     pub expr: Expr,
     pub transient_locals: u32,
