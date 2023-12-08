@@ -1,11 +1,11 @@
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
 use crate::error::Span;
-use crate::resolve::{FunctionId, GlobalId, Local, StackId, StringId, TransientId};
+use crate::resolve::{FunctionId, Local, StackId, StaticId, StringId, TransientId};
 
 #[derive(Debug, Clone)]
 pub enum Item {
     Function(Function),
-    Global(Global),
+    Static(Static),
 }
 
 #[derive(Debug, Clone)]
@@ -15,21 +15,21 @@ pub struct Function {
     pub id: FunctionId,
     pub params: Vec<Local>,
     pub block: Block,
-    pub transient_locals: u32,
-    pub stack_locals: u32,
-    pub global_dependencies: Vec<GlobalId>,
+    pub transient_locals: usize,
+    pub stack_locals: usize,
+    pub static_dependencies: Vec<StaticId>,
     pub function_dependencies: Vec<FunctionId>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Global {
+pub struct Static {
     pub name: String,
     pub span: Span,
-    pub id: GlobalId,
+    pub id: StaticId,
     pub expr: Expr,
-    pub transient_locals: u32,
-    pub stack_locals: u32,
-    pub global_dependencies: Vec<GlobalId>,
+    pub transient_locals: usize,
+    pub stack_locals: usize,
+    pub static_dependencies: Vec<StaticId>,
     pub function_dependencies: Vec<FunctionId>,
 }
 
@@ -37,7 +37,7 @@ pub struct Global {
 pub enum Expr {
     String(StringId),
     Int(i64),
-    Global(GlobalId),
+    Static(StaticId),
     Function(FunctionId),
     Stack(StackId),
     Transient(TransientId),
@@ -86,14 +86,14 @@ pub enum Expr {
 
 #[derive(Debug, Clone)]
 pub enum AddrOfExpr {
-    Global(GlobalId),
+    Static(StaticId),
     Stack(StackId),
     Index { target: Box<Expr>, index: Box<Expr> },
 }
 
 #[derive(Debug, Clone)]
 pub enum AssignTargetExpr {
-    Global(GlobalId),
+    Static(StaticId),
     Stack(StackId),
     Transient(TransientId),
     Deref(Box<Expr>),

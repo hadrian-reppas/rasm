@@ -8,7 +8,7 @@ pub enum Item {
         params: Vec<Name>,
         block: Block,
     },
-    Global {
+    Static {
         name: Name,
         expr: Expr,
     },

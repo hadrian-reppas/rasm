@@ -1,15 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::error::Error;
+use crate::error::{Error, Span};
 use crate::{ast, resolved};
 
-pub type GlobalId = u32;
-pub type FunctionId = u32;
-pub type StackId = u32;
-pub type TransientId = u32;
-pub type StringId = u32;
+pub type StaticId = usize;
+pub type FunctionId = usize;
+pub type StackId = usize;
+pub type TransientId = usize;
+pub type StringId = usize;
 
-pub type LocalId = u32;
+pub type LocalId = usize;
 
 #[derive(Debug, Clone, Copy)]
 enum LocalWip {
@@ -19,7 +19,7 @@ enum LocalWip {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Variable {
-    Global(GlobalId),
+    Static(StaticId),
     Function(FunctionId),
     Local(LocalId),
 }
@@ -33,19 +33,19 @@ pub enum Local {
 #[derive(Debug, Clone)]
 pub struct Resolved {
     pub functions: Vec<resolved::Function>,
-    pub globals: Vec<resolved::Global>,
+    pub statics: Vec<resolved::Static>,
     pub strings: Vec<String>,
 }
 
 pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
-    let (global_names, function_names) = make_globals_and_functions(&items)?;
+    let (static_names, function_names) = make_statics_and_functions(&items)?;
     let mut strings = HashMap::new();
-    let mut globals = Vec::new();
+    let mut statics = Vec::new();
     let mut functions = Vec::new();
 
     for item in items {
-        match resolve_item(item, &global_names, &function_names, &mut strings)? {
-            resolved::Item::Global(global) => globals.push(global),
+        match resolve_item(item, &static_names, &function_names, &mut strings)? {
+            resolved::Item::Static(static_) => statics.push(static_),
             resolved::Item::Function(function) => functions.push(function),
         }
     }
@@ -53,25 +53,32 @@ pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
     let mut strings: Vec<_> = strings.into_iter().collect();
     strings.sort_by_key(|(_, id)| *id);
 
-    Ok(Resolved {
-        functions,
-        globals,
-        strings: strings.into_iter().map(|(s, _)| s).collect(),
-    })
+    if function_names.contains_key("main") {
+        Ok(Resolved {
+            functions,
+            statics,
+            strings: strings.into_iter().map(|(s, _)| s).collect(),
+        })
+    } else {
+        Err(Error {
+            msg: "no `main` function".to_string(),
+            span: Span::empty(),
+        })
+    }
 }
 
-fn make_globals_and_functions(
+fn make_statics_and_functions(
     items: &[ast::Item],
-) -> Result<(HashMap<String, GlobalId>, HashMap<String, FunctionId>), Error> {
-    let mut globals = HashMap::new();
+) -> Result<(HashMap<String, StaticId>, HashMap<String, FunctionId>), Error> {
+    let mut statics = HashMap::new();
     let mut functions = HashMap::new();
     for item in items {
         let (name, is_function) = match item {
             ast::Item::Function { name, .. } => (name, true),
-            ast::Item::Global { name, .. } => (name, false),
+            ast::Item::Static { name, .. } => (name, false),
         };
 
-        if globals.contains_key(&name.name) || functions.contains_key(&name.name) {
+        if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
             return Err(Error {
                 msg: format!("duplicate global `{}`", name.name),
                 span: name.span,
@@ -79,17 +86,17 @@ fn make_globals_and_functions(
         }
 
         if is_function {
-            functions.insert(name.name.to_string(), functions.len() as FunctionId);
+            functions.insert(name.name.to_string(), functions.len());
         } else {
-            globals.insert(name.name.to_string(), globals.len() as GlobalId);
+            statics.insert(name.name.to_string(), statics.len());
         }
     }
-    Ok((globals, functions))
+    Ok((statics, functions))
 }
 
 fn resolve_item(
     item: ast::Item,
-    globals: &HashMap<String, GlobalId>,
+    statics: &HashMap<String, StaticId>,
     functions: &HashMap<String, FunctionId>,
     strings: &mut HashMap<String, StringId>,
 ) -> Result<resolved::Item, Error> {
@@ -99,7 +106,7 @@ fn resolve_item(
             params,
             mut block,
         } => {
-            let mut resolver = Resolver::with_params(&params, globals, functions, strings)?;
+            let mut resolver = Resolver::with_params(&params, statics, functions, strings)?;
             resolver.visit_block(&mut block)?;
             let params = params
                 .iter()
@@ -111,23 +118,23 @@ fn resolve_item(
                 id: functions[&name.name],
                 params,
                 block: resolver.convert_block(block)?,
-                transient_locals: resolver.transient_map.len() as u32,
+                transient_locals: resolver.transient_map.len(),
                 stack_locals: resolver.max_stack_locals,
-                global_dependencies: resolver.global_dependencies.into_iter().collect(),
+                static_dependencies: resolver.static_dependencies.into_iter().collect(),
                 function_dependencies: resolver.function_dependencies.into_iter().collect(),
             }))
         }
-        ast::Item::Global { name, mut expr } => {
-            let mut resolver = Resolver::new(globals, functions, strings);
+        ast::Item::Static { name, mut expr } => {
+            let mut resolver = Resolver::new(statics, functions, strings);
             resolver.visit_expr(&mut expr)?;
-            Ok(resolved::Item::Global(resolved::Global {
+            Ok(resolved::Item::Static(resolved::Static {
                 name: name.name.to_string(),
                 span: name.span,
-                id: globals[&name.name],
+                id: statics[&name.name],
                 expr: resolver.convert_expr(expr)?,
-                transient_locals: resolver.transient_map.len() as u32,
+                transient_locals: resolver.transient_map.len(),
                 stack_locals: resolver.max_stack_locals,
-                global_dependencies: resolver.global_dependencies.into_iter().collect(),
+                static_dependencies: resolver.static_dependencies.into_iter().collect(),
                 function_dependencies: resolver.function_dependencies.into_iter().collect(),
             }))
         }
@@ -135,27 +142,27 @@ fn resolve_item(
 }
 
 struct Resolver<'a> {
-    globals: &'a HashMap<String, GlobalId>,
+    statics: &'a HashMap<String, StaticId>,
     functions: &'a HashMap<String, FunctionId>,
     strings: &'a mut HashMap<String, StringId>,
     variable_stack: Vec<HashMap<String, LocalId>>,
     local_map: HashMap<LocalId, LocalWip>,
-    local_counter: u32,
-    current_stack_locals: u32,
-    max_stack_locals: u32,
+    local_counter: usize,
+    current_stack_locals: usize,
+    max_stack_locals: usize,
     transient_map: HashMap<LocalId, TransientId>,
-    global_dependencies: HashSet<GlobalId>,
+    static_dependencies: HashSet<StaticId>,
     function_dependencies: HashSet<FunctionId>,
 }
 
 impl<'a> Resolver<'a> {
     fn new(
-        globals: &'a HashMap<String, GlobalId>,
+        statics: &'a HashMap<String, StaticId>,
         functions: &'a HashMap<String, FunctionId>,
         strings: &'a mut HashMap<String, StringId>,
     ) -> Self {
         Resolver {
-            globals,
+            statics,
             functions,
             strings,
             variable_stack: Vec::new(),
@@ -164,14 +171,14 @@ impl<'a> Resolver<'a> {
             current_stack_locals: 0,
             max_stack_locals: 0,
             transient_map: HashMap::new(),
-            global_dependencies: HashSet::new(),
+            static_dependencies: HashSet::new(),
             function_dependencies: HashSet::new(),
         }
     }
 
     fn with_params(
         params: &[ast::Name],
-        globals: &'a HashMap<String, GlobalId>,
+        statics: &'a HashMap<String, StaticId>,
         functions: &'a HashMap<String, FunctionId>,
         strings: &'a mut HashMap<String, StringId>,
     ) -> Result<Self, Error> {
@@ -183,22 +190,22 @@ impl<'a> Resolver<'a> {
                     span: param.span,
                 });
             }
-            param_map.insert(param.name.clone(), local_id as LocalId);
+            param_map.insert(param.name.clone(), local_id);
         }
 
         Ok(Resolver {
-            globals,
+            statics,
             functions,
             strings,
             variable_stack: vec![param_map],
             local_map: (0..params.len())
-                .map(|id| (id as LocalId, LocalWip::Transient))
+                .map(|id| (id, LocalWip::Transient))
                 .collect(),
-            local_counter: params.len() as u32,
+            local_counter: params.len(),
             current_stack_locals: 0,
             max_stack_locals: 0,
             transient_map: HashMap::new(),
-            global_dependencies: HashSet::new(),
+            static_dependencies: HashSet::new(),
             function_dependencies: HashSet::new(),
         })
     }
@@ -210,7 +217,7 @@ impl<'a> Resolver<'a> {
                 if let Some(transient_id) = self.transient_map.get(&local_id) {
                     Local::Transient(*transient_id)
                 } else {
-                    let transient_id = self.transient_map.len() as TransientId;
+                    let transient_id = self.transient_map.len();
                     self.transient_map.insert(local_id, transient_id);
                     Local::Transient(transient_id)
                 }
@@ -225,9 +232,9 @@ impl<'a> Resolver<'a> {
             }
         }
 
-        if let Some(global_id) = self.globals.get(&name.name) {
-            self.global_dependencies.insert(*global_id);
-            Ok(Variable::Global(*global_id))
+        if let Some(static_id) = self.statics.get(&name.name) {
+            self.static_dependencies.insert(*static_id);
+            Ok(Variable::Static(*static_id))
         } else if let Some(function_id) = self.functions.get(&name.name) {
             self.function_dependencies.insert(*function_id);
             Ok(Variable::Function(*function_id))
@@ -429,14 +436,14 @@ impl<'a> Resolver<'a> {
                 if let Some(id) = self.strings.get(&string) {
                     Ok(resolved::Expr::String(*id))
                 } else {
-                    let id = self.strings.len() as StringId;
+                    let id = self.strings.len();
                     self.strings.insert(string, id);
                     Ok(resolved::Expr::String(id))
                 }
             }
             ast::Expr::Int(int) => Ok(resolved::Expr::Int(int)),
             ast::Expr::Name(name) => match name.variable_id.unwrap() {
-                Variable::Global(id) => Ok(resolved::Expr::Global(id)),
+                Variable::Static(id) => Ok(resolved::Expr::Static(id)),
                 Variable::Function(id) => Ok(resolved::Expr::Function(id)),
                 Variable::Local(id) => match self.convert_local_id(id) {
                     Local::Stack(id) => Ok(resolved::Expr::Stack(id)),
@@ -553,7 +560,7 @@ impl<'a> Resolver<'a> {
     ) -> Result<resolved::AssignTargetExpr, Error> {
         match expr {
             ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
-                Variable::Global(id) => Ok(resolved::AssignTargetExpr::Global(id)),
+                Variable::Static(id) => Ok(resolved::AssignTargetExpr::Static(id)),
                 Variable::Function(_) => Err(Error {
                     msg: format!("`{}` is a function", name.name),
                     span: name.span,
@@ -580,7 +587,7 @@ impl<'a> Resolver<'a> {
     ) -> Result<resolved::AddrOfExpr, Error> {
         match expr {
             ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
-                Variable::Global(id) => Ok(resolved::AddrOfExpr::Global(id)),
+                Variable::Static(id) => Ok(resolved::AddrOfExpr::Static(id)),
                 Variable::Function(_) => Err(Error {
                     msg: format!("`{}` is a function", name.name),
                     span: name.span,

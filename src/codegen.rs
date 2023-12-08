@@ -1,10 +1,10 @@
 use crate::error::Error;
-use crate::resolve::{GlobalId, Resolved};
+use crate::resolve::{Resolved, StaticId};
 use crate::resolved::*;
 
 pub fn compile(
     resolved: &Resolved,
-    init_order: &[GlobalId],
+    init_order: &[StaticId],
     output_file_path: &str,
 ) -> Result<(), Error> {
     todo!()
