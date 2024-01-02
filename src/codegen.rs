@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-use std::collections::HashMap;
-=======
 use std::collections::{BTreeSet, HashMap};
->>>>>>> dbdeb72 (start ir)
 use std::io::Write;
 use std::process::Command;
 
@@ -15,10 +11,7 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use tempfile::NamedTempFile;
 
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
-<<<<<<< HEAD
-=======
 use crate::builtins::{BuiltinFunction, BUILTIN_FUNCTIONS};
->>>>>>> dbdeb72 (start ir)
 use crate::error::{Error, Span};
 use crate::resolve::{FunctionId, Local, Resolved, StaticId, StringId};
 use crate::resolved::{
@@ -35,9 +28,6 @@ pub fn compile(
     let mut codegen = Codegen::new(resolved);
 
     let init_id = *codegen.function_ids.last().unwrap();
-<<<<<<< HEAD
-    for (function, id) in resolved.functions.iter().zip(codegen.function_ids.clone()) {
-=======
     for (function, id) in resolved.functions.iter().zip(
         codegen
             .function_ids
@@ -45,7 +35,6 @@ pub fn compile(
             .into_iter()
             .skip(BUILTIN_FUNCTIONS.len()),
     ) {
->>>>>>> dbdeb72 (start ir)
         if function.name == "main" && !init_order.is_empty() {
             codegen.compile_function(function, id, Some(init_id));
         } else {
@@ -58,8 +47,6 @@ pub fn compile(
         codegen.compile_function(&init, init_id, None);
     }
 
-<<<<<<< HEAD
-=======
     let builtins: BTreeSet<_> = resolved
         .functions
         .iter()
@@ -77,7 +64,6 @@ pub fn compile(
         codegen.compile_builtin(id, BUILTIN_FUNCTIONS[id]);
     }
 
->>>>>>> dbdeb72 (start ir)
     let object = codegen.module.finish().object;
     let bytes = object.write().unwrap();
     let mut file = NamedTempFile::new().map_err(|_| Error {
@@ -89,11 +75,6 @@ pub fn compile(
         span: Span::empty(),
     })?;
 
-<<<<<<< HEAD
-    let result = Command::new("cc")
-        .arg("-o")
-        .arg(output_file_path)
-=======
     // TODO: REMOVE
     std::fs::File::create("temp.o")
         .unwrap()
@@ -104,7 +85,6 @@ pub fn compile(
         .arg("-o")
         .arg(output_file_path)
         .arg("-lc")
->>>>>>> dbdeb72 (start ir)
         .arg(file.path())
         .status();
 
@@ -144,15 +124,6 @@ fn make_init_function(statics: &[Static], init_order: &[StaticId]) -> Function {
 }
 
 pub struct Codegen {
-<<<<<<< HEAD
-    module: ObjectModule,
-    context: Context,
-    builder_context: FunctionBuilderContext,
-    string_ids: Vec<DataId>,
-    static_ids: Vec<DataId>,
-    function_ids: Vec<FuncId>,
-    int: Type,
-=======
     pub module: ObjectModule,
     pub context: Context,
     pub builder_context: FunctionBuilderContext,
@@ -160,7 +131,6 @@ pub struct Codegen {
     pub static_ids: Vec<DataId>,
     pub function_ids: Vec<FuncId>,
     pub int: Type,
->>>>>>> dbdeb72 (start ir)
 }
 
 impl Codegen {
@@ -193,11 +163,7 @@ impl Codegen {
         let mut static_ids = Vec::new();
         for static_ in &resolved.statics {
             let id = module
-<<<<<<< HEAD
-                .declare_data(&static_.name, Linkage::Local, true, false)
-=======
                 .declare_data(&format!("_{}", static_.name), Linkage::Local, true, false)
->>>>>>> dbdeb72 (start ir)
                 .unwrap();
             description.define_zeroinit(SIZEOF_INT);
             description.align = Some(SIZEOF_INT as u64);
@@ -207,8 +173,6 @@ impl Codegen {
         }
 
         let mut function_ids = Vec::new();
-<<<<<<< HEAD
-=======
         for builtin in BUILTIN_FUNCTIONS {
             for _ in 0..builtin.params {
                 context.func.signature.params.push(AbiParam::new(int));
@@ -224,16 +188,11 @@ impl Codegen {
             function_ids.push(id);
             context.clear();
         }
->>>>>>> dbdeb72 (start ir)
         for function in &resolved.functions {
             for _ in &function.params {
                 context.func.signature.params.push(AbiParam::new(int));
             }
             context.func.signature.returns.push(AbiParam::new(int));
-<<<<<<< HEAD
-            let id = module
-                .declare_function(&function.name, Linkage::Export, &context.func.signature)
-=======
             let under_name = format!("_{}", function.name);
             let id = module
                 .declare_function(
@@ -245,7 +204,6 @@ impl Codegen {
                     Linkage::Export,
                     &context.func.signature,
                 )
->>>>>>> dbdeb72 (start ir)
                 .unwrap();
             function_ids.push(id);
             context.clear();
@@ -253,11 +211,7 @@ impl Codegen {
 
         if !resolved.statics.is_empty() {
             let id = module
-<<<<<<< HEAD
-                .declare_function("$init", Linkage::Export, &context.func.signature)
-=======
                 .declare_function("init", Linkage::Export, &context.func.signature)
->>>>>>> dbdeb72 (start ir)
                 .unwrap();
             function_ids.push(id);
         }
@@ -334,8 +288,6 @@ impl Codegen {
         self.module.define_function(id, &mut self.context).unwrap();
         self.module.clear_context(&mut self.context);
     }
-<<<<<<< HEAD
-=======
 
     fn compile_builtin(&mut self, id: FunctionId, builtin: BuiltinFunction) {
         let int = AbiParam::new(self.int);
@@ -353,7 +305,6 @@ impl Codegen {
             .unwrap();
         self.module.clear_context(&mut self.context);
     }
->>>>>>> dbdeb72 (start ir)
 }
 
 struct Translator<'a> {

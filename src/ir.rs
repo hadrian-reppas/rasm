@@ -10,11 +10,43 @@ pub struct Function {
     pub blocks: Vec<BasicBlock>,
 }
 
+impl Function {
+    pub fn print(&self) {
+        for (id, block) in self.blocks.iter().enumerate() {
+            block.print(id);
+        }
+    }
+}
+
+fn print_tuple(values: &[ValueId]) {
+    print!("(");
+    for (i, arg) in values.iter().enumerate() {
+        if i == 0 {
+            print!("v{arg}");
+        } else {
+            print!(", v{arg}")
+        }
+    }
+    print!(")");
+}
+
 #[derive(Debug, Clone)]
 pub struct BasicBlock {
     pub params: Vec<ValueId>,
     pub instrs: Vec<Instr>,
     pub terminator: Terminator,
+}
+
+impl BasicBlock {
+    fn print(&self, id: usize) {
+        print!("block{id}");
+        print_tuple(&self.params);
+        println!();
+        for instr in &self.instrs {
+            instr.print();
+        }
+        self.terminator.print();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +80,14 @@ pub enum Instr {
         target: ValueId,
         static_: StaticId,
     },
+    Load {
+        target: ValueId,
+        addr: ValueId,
+    },
+    Store {
+        addr: ValueId,
+        value: ValueId,
+    },
     String {
         target: ValueId,
         string: StringId,
@@ -79,13 +119,71 @@ pub enum Instr {
     },
 }
 
+impl Instr {
+    fn print(&self) {
+        match self {
+            Instr::Call {
+                target,
+                function,
+                args,
+            } => {
+                print!("    v{target} = call v{function} ");
+                print_tuple(args);
+                println!();
+            }
+            Instr::StackLoad { target, slot } => println!("    v{target} = stack_load {slot}"),
+            Instr::StackStore { slot, value } => println!("    stack_store {slot} v{value}"),
+            Instr::StackAddr { target, slot } => println!("    v{target} = stack_addr {slot}"),
+            Instr::StaticLoad { target, static_ } => {
+                println!("    v{target} = static_load {static_}")
+            }
+            Instr::StaticStore { static_, value } => {
+                println!("    static_store {static_} v{value}")
+            }
+            Instr::StaticAddr { target, static_ } => {
+                println!("    v{target} = static_addr {static_}")
+            }
+            Instr::Load { target, addr } => println!("    v{target} = load v{addr}"),
+            Instr::Store { addr, value } => println!("    store v{addr} v{value}"),
+            Instr::String { target, string } => println!("    v{target} = string {string}"),
+            Instr::Function { target, function } => println!("    v{target} = function {function}"),
+            Instr::Const { target, value } => println!("    v{target} = const {value}"),
+            Instr::Unary { target, value, op } => {
+                println!("    v{target} = {} v{value}", op.abbrev())
+            }
+            Instr::Binary {
+                target,
+                lhs,
+                rhs,
+                op,
+            } => println!("    v{target} = {} v{lhs} v{rhs}", op.abbrev()),
+            Instr::Cmp {
+                target,
+                lhs,
+                rhs,
+                op,
+            } => println!("    v{target} = {} v{lhs} v{rhs}", op.abbrev()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOp {
     Neg,
     BitNot,
     LogicalNot,
-    Deref,
     Test,
+}
+
+impl UnaryOp {
+    fn abbrev(self) -> &'static str {
+        match self {
+            UnaryOp::Neg => "neg",
+            UnaryOp::BitNot => "bit_not",
+            UnaryOp::LogicalNot => "logical_not",
+            UnaryOp::Test => "test",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,6 +201,24 @@ pub enum BinaryOp {
     BitOr,
 }
 
+impl BinaryOp {
+    fn abbrev(self) -> &'static str {
+        match self {
+            BinaryOp::Add => "add",
+            BinaryOp::Sub => "sub",
+            BinaryOp::Mul => "mul",
+            BinaryOp::Div => "div",
+            BinaryOp::Mod => "mod",
+            BinaryOp::Shl => "shl",
+            BinaryOp::ArithmeticShr => "arithmetic_shr",
+            BinaryOp::LogicalShr => "logical_shr",
+            BinaryOp::BitAnd => "bit_and",
+            BinaryOp::BitXor => "bit_xor",
+            BinaryOp::BitOr => "bit_or",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum CmpOp {
     Lt,
@@ -111,6 +227,19 @@ pub enum CmpOp {
     Ge,
     Eq,
     Ne,
+}
+
+impl CmpOp {
+    fn abbrev(self) -> &'static str {
+        match self {
+            CmpOp::Lt => "lt",
+            CmpOp::Le => "le",
+            CmpOp::Gt => "gt",
+            CmpOp::Ge => "ge",
+            CmpOp::Eq => "eq",
+            CmpOp::Ne => "ne",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +256,32 @@ pub enum Terminator {
         else_block: BlockId,
         else_args: Vec<ValueId>,
     },
+}
+
+impl Terminator {
+    fn print(&self) {
+        match self {
+            Terminator::Return(value) => println!("    return v{value}"),
+            Terminator::Jump { block, args } => {
+                print!("    jump block{block} ");
+                print_tuple(args);
+                println!();
+            }
+            Terminator::Branch {
+                test,
+                if_block,
+                if_args,
+                else_block,
+                else_args,
+            } => {
+                print!("    branch v{test} block{if_block} ");
+                print_tuple(if_args);
+                print!(" block{else_block} ");
+                print_tuple(else_args);
+                println!();
+            }
+        }
+    }
 }
 
 impl Terminator {

@@ -1,14 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::ast;
-use crate::ir::{BinaryOp, BlockId, CmpOp, Function, Instr, Terminator, UnaryOp, ValueId};
+use crate::ir::{
+    BasicBlock, BinaryOp, BlockId, CmpOp, Function, Instr, Terminator, UnaryOp, ValueId,
+};
 use crate::resolve::{FunctionId, Local, StackId, StaticId, StringId, TransientId};
 use crate::resolved::{self, AddrOfExpr, AssignTargetExpr, Block, ElseIf, Expr, ForInit, Stmt};
 
 const SIZEOF_INT: i64 = 8;
 
 pub fn lower(function: &resolved::Function) -> Function {
-    let mut builder = FunctionBuilder::new(function.params.len(), function.stack_locals);
+    let mut builder = FunctionBuilder::new(&function.params, function.stack_locals);
     let value = builder.block(&function.block);
     builder.return_(value);
     builder.finish()
@@ -23,10 +25,10 @@ pub struct FunctionBuilder {
 }
 
 impl FunctionBuilder {
-    fn new(params: usize, stack_variables: usize) -> Self {
+    fn new(params: &[Local], stack_variables: usize) -> Self {
         let entry_block = BasicBlockBuilder {
             predecessors: Vec::new(),
-            params: (0..params).collect(),
+            params: (0..params.len()).collect(),
             instrs: Vec::new(),
             terminator: None,
             variables: HashMap::new(),
@@ -34,17 +36,35 @@ impl FunctionBuilder {
             is_sealed: true,
         };
 
-        FunctionBuilder {
-            function_params: params,
+        let mut builder = FunctionBuilder {
+            function_params: params.len(),
             stack_variables,
             blocks: vec![entry_block],
-            value_counter: params,
+            value_counter: params.len(),
             current_block: 0,
+        };
+
+        for (value, param) in params.iter().enumerate() {
+            match param {
+                Local::Stack(slot) => builder.stack_store(*slot, value),
+                Local::Transient(variable) => builder.def_variable(*variable, value),
+            }
         }
+
+        builder
     }
 
     fn finish(self) -> Function {
-        todo!()
+        // TODO: remove redundant ValueIds
+        Function {
+            function_params: self.function_params,
+            stack_variables: self.stack_variables,
+            blocks: self
+                .blocks
+                .into_iter()
+                .map(BasicBlockBuilder::finish)
+                .collect(),
+        }
     }
 
     fn block(&mut self, block: &Block) -> ValueId {
@@ -84,7 +104,10 @@ impl FunctionBuilder {
             Expr::Unary { op, expr } => self.unary_expr(*op, expr),
             Expr::Assign { target, rhs } => self.assign_expr(target, rhs),
             Expr::AssignOp { op, target, rhs } => self.assign_op_expr(*op, target, rhs),
-            Expr::Index { target, index } => self.index_expr(target, index),
+            Expr::Index { target, index } => {
+                let addr = self.addr_of_index(target, index);
+                self.load(addr)
+            }
             Expr::Call { func, args } => self.call_expr(func, args),
             Expr::If {
                 test,
@@ -169,16 +192,61 @@ impl FunctionBuilder {
     fn logical_op(&mut self, lhs: &Expr, rhs: &Expr, is_and: bool) -> ValueId {
         let lhs = self.expr(lhs);
         let rhs_block = self.create_block();
+        let final_block = self.create_block();
 
-        todo!()
+        if is_and {
+            let zero = self.const_(0);
+            self.branch(lhs, rhs_block, Vec::new(), final_block, vec![zero]);
+        } else {
+            let test = self.unary(lhs, UnaryOp::Test);
+            self.branch(lhs, final_block, vec![test], rhs_block, Vec::new());
+        }
+
+        self.switch_to_block(rhs_block);
+        self.seal_block(rhs_block);
+        let rhs = self.expr(rhs);
+        let test = self.unary(rhs, UnaryOp::Test);
+        self.jump(final_block, vec![test]);
+
+        self.switch_to_block(final_block);
+        self.seal_block(final_block);
+        self.new_block_param(final_block)
     }
 
     fn unary_expr(&mut self, op: ast::UnaryOp, expr: &Expr) -> ValueId {
-        todo!()
+        let expr = self.expr(expr);
+        match op {
+            ast::UnaryOp::Negate => self.unary(expr, UnaryOp::Neg),
+            ast::UnaryOp::BitNot => self.unary(expr, UnaryOp::BitNot),
+            ast::UnaryOp::LogicalNot => self.unary(expr, UnaryOp::LogicalNot),
+            ast::UnaryOp::Deref => self.load(expr),
+        }
     }
 
     fn assign_expr(&mut self, target: &AssignTargetExpr, rhs: &Expr) -> ValueId {
-        todo!()
+        let rhs = self.expr(rhs);
+        match target {
+            AssignTargetExpr::Static(id) => self.static_store(*id, rhs),
+            AssignTargetExpr::Stack(id) => self.stack_store(*id, rhs),
+            AssignTargetExpr::Transient(id) => self.def_variable(*id, rhs),
+            AssignTargetExpr::Deref(expr) => {
+                let addr = self.expr(expr);
+                self.store(addr, rhs);
+            }
+            AssignTargetExpr::Index { target, index } => {
+                let addr = self.addr_of_index(target, index);
+                self.store(addr, rhs);
+            }
+        }
+        rhs
+    }
+
+    fn addr_of_index(&mut self, target: &Expr, index: &Expr) -> ValueId {
+        let base = self.expr(target);
+        let index = self.expr(index);
+        let size = self.const_(SIZEOF_INT);
+        let offset = self.binary(index, size, BinaryOp::Mul);
+        self.binary(base, offset, BinaryOp::Add)
     }
 
     fn assign_op_expr(
@@ -187,15 +255,68 @@ impl FunctionBuilder {
         target: &AssignTargetExpr,
         rhs: &Expr,
     ) -> ValueId {
-        todo!()
-    }
+        let rhs = self.expr(rhs);
 
-    fn index_expr(&mut self, target: &Expr, index: &Expr) -> ValueId {
-        todo!()
+        macro_rules! do_op {
+            ($old_val:expr) => {
+                match op {
+                    ast::AssignOp::Mul => self.binary($old_val, rhs, BinaryOp::Mul),
+                    ast::AssignOp::Div => self.binary($old_val, rhs, BinaryOp::Div),
+                    ast::AssignOp::Mod => self.binary($old_val, rhs, BinaryOp::Mod),
+                    ast::AssignOp::Add => self.binary($old_val, rhs, BinaryOp::Add),
+                    ast::AssignOp::Sub => self.binary($old_val, rhs, BinaryOp::Sub),
+                    ast::AssignOp::Shl => self.binary($old_val, rhs, BinaryOp::Shl),
+                    ast::AssignOp::ArithmeticShr => {
+                        self.binary($old_val, rhs, BinaryOp::ArithmeticShr)
+                    }
+                    ast::AssignOp::LogicalShr => self.binary($old_val, rhs, BinaryOp::LogicalShr),
+                    ast::AssignOp::BitAnd => self.binary($old_val, rhs, BinaryOp::BitAnd),
+                    ast::AssignOp::BitXor => self.binary($old_val, rhs, BinaryOp::BitXor),
+                    ast::AssignOp::BitOr => self.binary($old_val, rhs, BinaryOp::BitOr),
+                }
+            };
+        }
+
+        match target {
+            AssignTargetExpr::Static(static_) => {
+                let old_val = self.static_load(*static_);
+                let new_val = do_op!(old_val);
+                self.static_store(*static_, new_val);
+                new_val
+            }
+            AssignTargetExpr::Stack(slot) => {
+                let old_val = self.stack_load(*slot);
+                let new_val = do_op!(old_val);
+                self.stack_store(*slot, new_val);
+                new_val
+            }
+            AssignTargetExpr::Transient(variable) => {
+                let old_val = self.use_variable(*variable);
+                let new_val = do_op!(old_val);
+                self.def_variable(*variable, new_val);
+                new_val
+            }
+            AssignTargetExpr::Deref(addr) => {
+                let addr = self.expr(addr);
+                let old_val = self.load(addr);
+                let new_val = do_op!(old_val);
+                self.store(addr, new_val);
+                new_val
+            }
+            AssignTargetExpr::Index { target, index } => {
+                let addr = self.addr_of_index(target, index);
+                let old_val = self.load(addr);
+                let new_val = do_op!(old_val);
+                self.store(addr, new_val);
+                new_val
+            }
+        }
     }
 
     fn call_expr(&mut self, func: &Expr, args: &[Expr]) -> ValueId {
-        todo!()
+        let func = self.expr(func);
+        let args: Vec<_> = args.iter().map(|arg| self.expr(arg)).collect();
+        self.call(func, args)
     }
 
     fn if_expr(
@@ -205,7 +326,45 @@ impl FunctionBuilder {
         else_ifs: &[ElseIf],
         else_block: Option<&Block>,
     ) -> ValueId {
-        todo!()
+        let test = self.expr(test);
+        let if_block_id = self.create_block();
+        let mut next_block = self.create_block();
+        let final_block = self.create_block();
+        self.branch(test, if_block_id, Vec::new(), next_block, Vec::new());
+
+        self.switch_to_block(if_block_id);
+        self.seal_block(if_block_id);
+        let value = self.block(if_block);
+        self.jump(final_block, vec![value]);
+
+        for else_if in else_ifs {
+            self.switch_to_block(next_block);
+            self.seal_block(next_block);
+            let else_if_block = self.create_block();
+            let next_next_block = self.create_block();
+
+            let test = self.expr(&else_if.test);
+            self.branch(test, else_if_block, Vec::new(), next_next_block, Vec::new());
+            self.switch_to_block(else_if_block);
+            self.seal_block(else_if_block);
+            let value = self.block(&else_if.block);
+            self.jump(final_block, vec![value]);
+
+            next_block = next_next_block;
+        }
+
+        self.switch_to_block(next_block);
+        self.seal_block(next_block);
+        let value = if let Some(block) = else_block {
+            self.block(block)
+        } else {
+            self.const_(0)
+        };
+        self.jump(final_block, vec![value]);
+
+        self.switch_to_block(final_block);
+        self.seal_block(final_block);
+        self.new_block_param(final_block)
     }
 
     fn for_expr(
@@ -215,7 +374,47 @@ impl FunctionBuilder {
         update: Option<&Expr>,
         block: &Block,
     ) -> ValueId {
-        todo!()
+        match init {
+            None => {}
+            Some(ForInit::Let { id, expr }) => {
+                let expr = self.expr(expr);
+                match id {
+                    Local::Stack(slot) => self.stack_store(*slot, expr),
+                    Local::Transient(variable) => self.def_variable(*variable, expr),
+                }
+            }
+            Some(ForInit::Expr(expr)) => {
+                self.expr(expr);
+            }
+        }
+
+        let body_block = self.create_block();
+        let final_block = self.create_block();
+
+        if let Some(test) = test {
+            let test = self.expr(test);
+            self.branch(test, body_block, Vec::new(), final_block, Vec::new());
+        } else {
+            self.jump(body_block, Vec::new());
+        }
+
+        self.switch_to_block(body_block);
+        self.block(block);
+        if let Some(update) = update {
+            self.expr(update);
+        }
+
+        if let Some(test) = test {
+            let test = self.expr(test);
+            self.branch(test, body_block, Vec::new(), final_block, Vec::new());
+        } else {
+            self.jump(body_block, Vec::new());
+        }
+
+        self.seal_block(body_block);
+        self.seal_block(final_block);
+        self.switch_to_block(final_block);
+        self.const_(0)
     }
 
     fn next_value_id(&mut self) -> ValueId {
@@ -276,15 +475,15 @@ impl FunctionBuilder {
     }
 
     fn use_variable(&mut self, variable: TransientId) -> ValueId {
+        assert!(self.blocks[self.current_block].terminator.is_none());
         self.read_variable(variable, self.current_block)
     }
 
     fn read_variable(&mut self, variable: TransientId, block: BlockId) -> ValueId {
-        assert!(self.blocks[self.current_block].terminator.is_none());
-        if let Some(value) = self.blocks[self.current_block].variables.get(&variable) {
+        if let Some(value) = self.blocks[block].variables.get(&variable) {
             *value
         } else {
-            self.read_variable_recursive(variable, self.current_block)
+            self.read_variable_recursive(variable, block)
         }
     }
 
@@ -375,6 +574,22 @@ impl FunctionBuilder {
             .instrs
             .push(Instr::StaticAddr { target, static_ });
         target
+    }
+
+    fn load(&mut self, addr: ValueId) -> ValueId {
+        assert!(self.blocks[self.current_block].terminator.is_none());
+        let target = self.next_value_id();
+        self.blocks[self.current_block]
+            .instrs
+            .push(Instr::Load { target, addr });
+        target
+    }
+
+    fn store(&mut self, addr: ValueId, value: ValueId) {
+        assert!(self.blocks[self.current_block].terminator.is_none());
+        self.blocks[self.current_block]
+            .instrs
+            .push(Instr::Store { addr, value });
     }
 
     fn string(&mut self, string: StringId) -> ValueId {
@@ -486,6 +701,17 @@ struct BasicBlockBuilder {
     variables: HashMap<TransientId, ValueId>,
     incomplete: HashMap<TransientId, ValueId>,
     is_sealed: bool,
+}
+
+impl BasicBlockBuilder {
+    fn finish(self) -> BasicBlock {
+        assert!(self.is_sealed);
+        BasicBlock {
+            params: self.params,
+            instrs: self.instrs,
+            terminator: self.terminator.unwrap(),
+        }
+    }
 }
 
 #[derive(Clone)]

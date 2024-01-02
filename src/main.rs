@@ -1,18 +1,12 @@
 use std::process::ExitCode;
 
 mod ast;
-<<<<<<< HEAD
-mod codegen;
-mod error;
-mod lex;
-=======
 mod builtins;
 mod codegen;
 mod error;
 mod ir;
 mod lex;
 mod lower;
->>>>>>> dbdeb72 (start ir)
 mod parse;
 mod resolve;
 mod resolved;
@@ -43,6 +37,14 @@ fn compile(input_file_path: &str, output_file_path: &str) -> Result<(), error::E
 
     let items = parse::parse(code)?;
     let resolved = resolve::resolve(items)?;
-    let order = toposort::static_initialization_order(&resolved)?;
-    codegen::compile(&resolved, &order, output_file_path)
+    for function in &resolved.functions {
+        let lowered = lower::lower(function);
+        println!("fn {} {{", function.name);
+        lowered.print();
+        println!("}}\n");
+    }
+    // let order = toposort::static_initialization_order(&resolved)?;
+    // codegen::compile(&resolved, &order, output_file_path)
+
+    todo!()
 }

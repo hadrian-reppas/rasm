@@ -1,9 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-<<<<<<< HEAD
-=======
 use crate::builtins::{BUILTIN_FUNCTIONS, BUILTIN_STRINGS};
->>>>>>> dbdeb72 (start ir)
 use crate::error::{Error, Span};
 use crate::{ast, resolved};
 
@@ -43,11 +40,6 @@ pub struct Resolved {
 
 pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
     let (static_names, function_names) = make_statics_and_functions(&items)?;
-<<<<<<< HEAD
-    let mut strings = HashMap::new();
-    let mut statics = Vec::new();
-    let mut functions = Vec::new();
-=======
     let mut statics = Vec::new();
     let mut functions = Vec::new();
     let mut strings: HashMap<_, _> = BUILTIN_STRINGS
@@ -56,7 +48,6 @@ pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
         .map(String::from)
         .zip(0..)
         .collect();
->>>>>>> dbdeb72 (start ir)
 
     for item in items {
         match resolve_item(item, &static_names, &function_names, &mut strings)? {
@@ -86,16 +77,12 @@ fn make_statics_and_functions(
     items: &[ast::Item],
 ) -> Result<(HashMap<String, StaticId>, HashMap<String, FunctionId>), Error> {
     let mut statics = HashMap::new();
-<<<<<<< HEAD
-    let mut functions = HashMap::new();
-=======
     let mut functions: HashMap<_, _> = BUILTIN_FUNCTIONS
         .iter()
         .map(|f| f.name.to_string())
         .zip(0..)
         .collect();
 
->>>>>>> dbdeb72 (start ir)
     for item in items {
         let (name, is_function) = match item {
             ast::Item::Function { name, .. } => (name, true),

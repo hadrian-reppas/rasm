@@ -1,9 +1,6 @@
 use std::collections::HashSet;
 
-<<<<<<< HEAD
-=======
 use crate::builtins::BUILTIN_FUNCTIONS;
->>>>>>> dbdeb72 (start ir)
 use crate::error::{Error, Span};
 use crate::resolve::{Resolved, StaticId};
 
@@ -18,23 +15,15 @@ pub fn static_initialization_order(resolved: &Resolved) -> Result<Vec<StaticId>,
 
         while let Some(function_id) = function_stack.pop() {
             dependencies.extend(
-<<<<<<< HEAD
-                resolved.functions[function_id]
-=======
                 resolved.functions[function_id - BUILTIN_FUNCTIONS.len()]
->>>>>>> dbdeb72 (start ir)
                     .static_dependencies
                     .iter()
                     .copied(),
             );
 
-<<<<<<< HEAD
-            for id in &resolved.functions[function_id].function_dependencies {
-=======
             for id in
                 &resolved.functions[function_id - BUILTIN_FUNCTIONS.len()].function_dependencies
             {
->>>>>>> dbdeb72 (start ir)
                 if !seen_functions.contains(id) {
                     function_stack.push(*id);
                     seen_functions.insert(*id);
