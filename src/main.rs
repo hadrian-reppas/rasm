@@ -26,17 +26,11 @@ fn main() -> ExitCode {
 
 fn compile(maybe_input: Option<&str>, output_file: &str) -> Result<(), error::Error> {
     let Some(input_file) = maybe_input else {
-        return Err(error::Error {
-            span: error::Span::empty(),
-            msg: "no input file".to_string(),
-        });
+        return Err(error::Error::msg("no input file"));
     };
 
     let code = std::fs::read_to_string(input_file)
-        .map_err(|_| error::Error {
-            msg: format!("cannot read file {input_file:?}"),
-            span: error::Span::empty(),
-        })?
+        .map_err(|_| error::Error::msg("cannot read file {input_file:?}"))?
         .leak();
 
     let items = parse::parse(code)?;

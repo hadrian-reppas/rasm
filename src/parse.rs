@@ -37,10 +37,7 @@ impl Parser {
         if self.peek().kind == kind {
             Ok(self.next()?)
         } else {
-            Err(Error {
-                msg: "unexpected token".to_string(),
-                span: self.peek().span,
-            })
+            Err(Error::new(self.peek().span, "unexpected token"))
         }
     }
 
@@ -98,10 +95,7 @@ impl Parser {
                 self.expect(TokenKind::Semi)?;
                 Ok(Item::Static { name, expr })
             }
-            _ => Err(Error {
-                msg: "expected `fn` or `let`".to_string(),
-                span: self.peek().span,
-            }),
+            _ => Err(Error::new(self.peek().span, "expected `fn` or `let`")),
         }
     }
 
@@ -144,10 +138,10 @@ impl Parser {
                             if expr.ends_with_block() {
                                 stmts.push(Stmt::Expr(expr));
                             } else {
-                                return Err(Error {
-                                    msg: "expected `;` after expression".to_string(),
-                                    span: self.peek().span,
-                                });
+                                return Err(Error::new(
+                                    self.peek().span,
+                                    "expected `;` after expression",
+                                ));
                             }
                         }
                     }
@@ -223,10 +217,10 @@ impl Parser {
             TokenKind::Return => {
                 let token = self.expect(TokenKind::Return)?;
                 if !allow_return {
-                    return Err(Error {
-                        msg: "`return` not allowed in static initializers".to_string(),
-                        span: token.span,
-                    });
+                    return Err(Error::new(
+                        token.span,
+                        "`return` not allowed in static initializers",
+                    ));
                 }
                 let expr = if self.peek().kind.is_expr_start() {
                     None
@@ -294,24 +288,21 @@ impl Parser {
                 let expr = self.expr(BindingPower::Prefix, allow_return)?;
                 if let Ok(place) = expr.try_into() {
                     if matches!(place, PlaceExpr::Deref(_)) {
-                        return Err(Error {
-                            msg: "cannot take address of deref expression".to_string(),
-                            span: and.span,
-                        });
+                        return Err(Error::new(
+                            and.span,
+                            "cannot take address of deref expression",
+                        ));
                     }
                     Expr::AddrOf(place)
                 } else {
-                    return Err(Error {
-                        msg: "target is not an lvalue".to_string(),
-                        span: and.span,
-                    });
+                    return Err(Error::new(and.span, "target is not a place expression"));
                 }
             }
             _ => {
-                return Err(Error {
-                    msg: "unexpected token in expression".to_string(),
-                    span: self.peek().span,
-                })
+                return Err(Error::new(
+                    self.peek().span,
+                    "unexpected token in expression",
+                ))
             }
         };
 
@@ -330,10 +321,7 @@ impl Parser {
                     let assign = self.next()?;
                     let rhs = self.expr(BindingPower::Assign, allow_return)?;
                     let Ok(target) = lhs.try_into() else {
-                        return Err(Error {
-                            msg: "target is not an lvalue".to_string(),
-                            span: assign.span,
-                        });
+                        return Err(Error::new(assign.span, "target is not a place expression"));
                     };
                     Expr::AssignOp {
                         op,
@@ -345,10 +333,7 @@ impl Parser {
                     let assign = self.expect(TokenKind::Assign)?;
                     let rhs = self.expr(BindingPower::Assign, allow_return)?;
                     let Ok(target) = lhs.try_into() else {
-                        return Err(Error {
-                            msg: "target is not an lvalue".to_string(),
-                            span: assign.span,
-                        });
+                        return Err(Error::new(assign.span, "target is not a place expression"));
                     };
                     Expr::Assign {
                         target,

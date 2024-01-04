@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::builtins::{BUILTIN_FUNCTIONS, BUILTIN_STRINGS};
-use crate::error::{Error, Span};
+use crate::error::Error;
 use crate::{ast, resolved};
 
 pub type StaticId = usize;
@@ -66,10 +66,7 @@ pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
             strings: strings.into_iter().map(|(s, _)| s).collect(),
         })
     } else {
-        Err(Error {
-            msg: "no `main` function".to_string(),
-            span: Span::empty(),
-        })
+        Err(Error::msg("no `main` function"))
     }
 }
 
@@ -90,10 +87,10 @@ fn make_statics_and_functions(
         };
 
         if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
-            return Err(Error {
-                msg: format!("duplicate global `{}`", name.name),
-                span: name.span,
-            });
+            return Err(Error::new(
+                name.span,
+                format!("duplicate global `{}`", name.name),
+            ));
         }
 
         if is_function {
@@ -196,10 +193,10 @@ impl<'a> Resolver<'a> {
         let mut param_map = HashMap::new();
         for (local_id, param) in params.iter().enumerate() {
             if param_map.contains_key(&param.name) {
-                return Err(Error {
-                    msg: format!("duplicate parameter `{}`", param.name),
-                    span: param.span,
-                });
+                return Err(Error::new(
+                    param.span,
+                    format!("duplicate parameter `{}`", param.name),
+                ));
             }
             param_map.insert(param.name.clone(), local_id);
         }
@@ -250,10 +247,10 @@ impl<'a> Resolver<'a> {
             self.function_dependencies.insert(*function_id);
             Ok(Variable::Function(*function_id))
         } else {
-            Err(Error {
-                msg: format!("no variable `{}`", name.name),
-                span: name.span,
-            })
+            Err(Error::new(
+                name.span,
+                format!("no variable `{}`", name.name),
+            ))
         }
     }
 
@@ -572,10 +569,10 @@ impl<'a> Resolver<'a> {
         match expr {
             ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
                 Variable::Static(id) => Ok(resolved::AssignTargetExpr::Static(id)),
-                Variable::Function(_) => Err(Error {
-                    msg: format!("`{}` is a function", name.name),
-                    span: name.span,
-                }),
+                Variable::Function(_) => Err(Error::new(
+                    name.span,
+                    format!("`{}` is a function", name.name),
+                )),
                 Variable::Local(id) => match self.convert_local_id(id) {
                     Local::Stack(id) => Ok(resolved::AssignTargetExpr::Stack(id)),
                     Local::Transient(id) => Ok(resolved::AssignTargetExpr::Transient(id)),
@@ -599,10 +596,10 @@ impl<'a> Resolver<'a> {
         match expr {
             ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
                 Variable::Static(id) => Ok(resolved::AddrOfExpr::Static(id)),
-                Variable::Function(_) => Err(Error {
-                    msg: format!("`{}` is a function", name.name),
-                    span: name.span,
-                }),
+                Variable::Function(_) => Err(Error::new(
+                    name.span,
+                    format!("`{}` is a function", name.name),
+                )),
                 Variable::Local(id) => match self.convert_local_id(id) {
                     Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
                     Local::Transient(_) => unreachable!(),
