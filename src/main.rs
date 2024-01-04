@@ -2,7 +2,6 @@ use std::process::ExitCode;
 
 mod ast;
 mod builtins;
-mod codegen;
 mod error;
 mod ir;
 mod lex;
@@ -37,14 +36,13 @@ fn compile(input_file_path: &str, output_file_path: &str) -> Result<(), error::E
 
     let items = parse::parse(code)?;
     let resolved = resolve::resolve(items)?;
-    for function in &resolved.functions {
-        let lowered = lower::lower(function);
-        println!("fn {} {{", function.name);
-        lowered.print();
-        println!("}}\n");
-    }
-    // let order = toposort::static_initialization_order(&resolved)?;
-    // codegen::compile(&resolved, &order, output_file_path)
+    let lowered: Vec<_> = resolved
+        .functions
+        .iter()
+        .map(lower::lower)
+        .inspect(ir::Function::print)
+        .collect();
+    let order = toposort::static_initialization_order(&resolved)?;
 
     todo!()
 }

@@ -282,9 +282,7 @@ impl Terminator {
             }
         }
     }
-}
 
-impl Terminator {
     pub fn push_jump_value(&mut self, value: ValueId) {
         let Terminator::Jump { args, .. } = self else {
             panic!()
@@ -304,5 +302,26 @@ impl Terminator {
             panic!()
         };
         else_args.push(value);
+    }
+
+    pub fn get_jump_value(&self, index: usize) -> ValueId {
+        let Terminator::Jump { args, .. } = self else {
+            panic!()
+        };
+        args[index]
+    }
+
+    pub fn get_branch_if_value(&self, index: usize) -> ValueId {
+        let Terminator::Branch { if_args, .. } = self else {
+            panic!()
+        };
+        if_args[index]
+    }
+
+    pub fn get_branch_else_value(&self, index: usize) -> ValueId {
+        let Terminator::Branch { else_args, .. } = self else {
+            panic!()
+        };
+        else_args[index]
     }
 }

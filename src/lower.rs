@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 use crate::ir::{
@@ -54,8 +54,9 @@ impl FunctionBuilder {
         builder
     }
 
-    fn finish(self) -> Function {
-        // TODO: remove redundant ValueIds
+    fn finish(mut self) -> Function {
+        // self.remove_redundant_block_params();
+        self.remove_unused_block_params();
         Function {
             function_params: self.function_params,
             stack_variables: self.stack_variables,
@@ -64,6 +65,56 @@ impl FunctionBuilder {
                 .into_iter()
                 .map(BasicBlockBuilder::finish)
                 .collect(),
+        }
+    }
+
+    fn remove_redundant_block_params(&mut self) {
+        let mut map = HashMap::new();
+        for block in self.blocks.iter().skip(1) {
+            for (i, param) in block.params.iter().enumerate() {
+                let pred_vals: HashSet<_> = block
+                    .predecessors
+                    .iter()
+                    .map(|pred| self.get_pred_val(pred, i))
+                    .filter(|val| val != param)
+                    .collect();
+                map.insert(*param, pred_vals);
+            }
+        }
+
+        //        let mut roots = HashMap::new();
+        for param in map.keys() {
+            //  let mut param_roots = HashSet::new();
+            let mut stack = vec![*param];
+            let mut seen = HashSet::new();
+            while let Some(value) = stack.pop() {
+                if !seen.insert(value) {
+                    continue;
+                }
+                // todo!();
+            }
+        }
+
+        dbg!(&map);
+
+        // TODO
+    }
+
+    fn find_and_replace_values(&mut self, map: &HashMap<ValueId, ValueId>) -> HashSet<ValueId> {
+        todo!()
+    }
+
+    fn remove_unused_block_params(&mut self) {
+        // TODO
+        // todo!()
+    }
+
+    fn get_pred_val(&self, pred: &Predecessor, index: usize) -> ValueId {
+        let terminator = self.blocks[pred.block].terminator.as_ref().unwrap();
+        match pred.kind {
+            PredecessorKind::Jump => terminator.get_jump_value(index),
+            PredecessorKind::BranchIf => terminator.get_branch_if_value(index),
+            PredecessorKind::BranchElse => terminator.get_branch_else_value(index),
         }
     }
 
@@ -504,11 +555,12 @@ impl FunctionBuilder {
 
             let preds = self.blocks[block].predecessors.clone();
             for pred in preds {
+                let pred_value = self.read_variable(variable, pred.block);
                 let terminator = self.blocks[pred.block].terminator.as_mut().unwrap();
                 match pred.kind {
-                    PredecessorKind::Jump => terminator.push_jump_value(value),
-                    PredecessorKind::BranchIf => terminator.push_branch_if_value(value),
-                    PredecessorKind::BranchElse => terminator.push_branch_if_value(value),
+                    PredecessorKind::Jump => terminator.push_jump_value(pred_value),
+                    PredecessorKind::BranchIf => terminator.push_branch_if_value(pred_value),
+                    PredecessorKind::BranchElse => terminator.push_branch_if_value(pred_value),
                 }
             }
             value
@@ -714,13 +766,13 @@ impl BasicBlockBuilder {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Predecessor {
     block: BlockId,
     kind: PredecessorKind,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum PredecessorKind {
     Jump,
     BranchIf,

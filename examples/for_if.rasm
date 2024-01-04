@@ -1,0 +1,9 @@
+fn main() {
+	let x = -10;
+	for (; x;) {
+		if (true) {
+			x += 1;
+		}
+	}
+	x
+}
