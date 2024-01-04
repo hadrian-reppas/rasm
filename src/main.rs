@@ -3,9 +3,7 @@ use std::process::ExitCode;
 mod ast;
 mod builtins;
 mod error;
-mod ir;
 mod lex;
-mod lower;
 mod parse;
 mod resolve;
 mod resolved;
@@ -13,11 +11,11 @@ mod toposort;
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
-    let input_file_path = args.next().unwrap();
+    let maybe_input = args.next();
     let maybe_out = args.next();
-    let output_file_path = maybe_out.as_deref().unwrap_or("out");
+    let output_file = maybe_out.as_deref().unwrap_or("out");
 
-    match compile(&input_file_path, output_file_path) {
+    match compile(maybe_input.as_deref(), output_file) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             error.print();
@@ -26,22 +24,23 @@ fn main() -> ExitCode {
     }
 }
 
-fn compile(input_file_path: &str, output_file_path: &str) -> Result<(), error::Error> {
-    let code = std::fs::read_to_string(input_file_path)
+fn compile(maybe_input: Option<&str>, output_file: &str) -> Result<(), error::Error> {
+    let Some(input_file) = maybe_input else {
+        return Err(error::Error {
+            span: error::Span::empty(),
+            msg: "no input file".to_string(),
+        });
+    };
+
+    let code = std::fs::read_to_string(input_file)
         .map_err(|_| error::Error {
-            msg: format!("cannot read file {input_file_path:?}"),
+            msg: format!("cannot read file {input_file:?}"),
             span: error::Span::empty(),
         })?
         .leak();
 
     let items = parse::parse(code)?;
     let resolved = resolve::resolve(items)?;
-    let lowered: Vec<_> = resolved
-        .functions
-        .iter()
-        .map(lower::lower)
-        .inspect(ir::Function::print)
-        .collect();
     let order = toposort::static_initialization_order(&resolved)?;
 
     todo!()
