@@ -72,7 +72,6 @@ pub enum Expr {
     If {
         test: Box<Expr>,
         if_block: Block,
-        else_ifs: Vec<ElseIf>,
         else_block: Option<Block>,
     },
     For {
@@ -98,12 +97,6 @@ pub enum AssignTargetExpr {
     Transient(TransientId),
     Deref(Box<Expr>),
     Index { target: Box<Expr>, index: Box<Expr> },
-}
-
-#[derive(Debug, Clone)]
-pub struct ElseIf {
-    pub test: Expr,
-    pub block: Block,
 }
 
 #[derive(Debug, Clone)]

@@ -7,9 +7,7 @@ use crate::ast::{AssignOp, BinaryOp, UnaryOp};
 use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
 use crate::resolve::{FunctionId, Local, Resolved, StaticId, StringId};
-use crate::resolved::{
-    AddrOfExpr, AssignTargetExpr, Block, ElseIf, Expr, ForInit, Function, Static, Stmt,
-};
+use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, ForInit, Function, Static, Stmt};
 
 const RASM_PREFIX: &'static str = "$";
 const PRELUDE: &'static str = r#"
@@ -281,9 +279,8 @@ impl<'a> Codegen<'a> {
             Expr::If {
                 test,
                 if_block,
-                else_ifs,
                 else_block,
-            } => self.if_expr(test, if_block, else_ifs, else_block.as_ref()),
+            } => self.if_expr(test, if_block, else_block.as_ref()),
             Expr::For {
                 init,
                 test,
@@ -515,13 +512,7 @@ impl<'a> Codegen<'a> {
         id
     }
 
-    fn if_expr(
-        &mut self,
-        test: &Expr,
-        if_block: &Block,
-        else_ifs: &[ElseIf],
-        else_block: Option<&Block>,
-    ) -> ValueId {
+    fn if_expr(&mut self, test: &Expr, if_block: &Block, else_block: Option<&Block>) -> ValueId {
         todo!()
     }
 
