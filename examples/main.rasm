@@ -3,15 +3,41 @@ let stack = {
 	&x
 };
 
+let tail = unicode + seven;
 let unicode = "hello, გთხოვთ\tコンニチハ\"\\\n";
+let seven = 7;
 
 fn two() { 2 }
 
 fn fma(x, y, z) {
 	&y;
-	x + y * z;
+	x + y * z
 }
 
 fn main(argc, argv) {
-	argc + argv + stack
+	let x = fma(argc, argv, stack);
+	puts(unicode);
+	puts(tail);
+	putd(x);
+	putc('\n');
+
+	puts(*argv);
+	putc('\n');
+
+	puts("!5 = ");
+	putd(!5);
+	puts("\n!0 = ");
+	putd(!0);
+	puts("\n!!5 = ");
+	putd(!!5);
+	puts("\n~5 = ");
+	putd(~5);
+	puts("\n-5 = ");
+	putd(-(5));
+	puts("\n\n");
+	
+	putd(argv == &argv[0]);
+	putc('\n');
+	putd(-9223372036854775808 < 100);
+	putc('\n');
 }
