@@ -6,7 +6,7 @@ use tempfile::NamedTempFile;
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
 use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
-use crate::resolve::{FunctionId, Local, Resolved, StaticId, StringId};
+use crate::resolve::{FunctionId, Local, Resolved, StaticId, StringId, TransientId};
 use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, ForInit, Function, Static, Stmt};
 
 const RASM_PREFIX: &'static str = "$";
@@ -54,6 +54,7 @@ struct Codegen<'a> {
     strings: &'a [String],
     init_order: &'a [StaticId],
     id_counter: usize,
+    current_block: usize,
 }
 
 macro_rules! push {
@@ -93,7 +94,8 @@ impl<'a> Codegen<'a> {
             statics,
             strings,
             init_order,
-            id_counter: 0,
+            id_counter: 1,
+            current_block: 0,
         };
 
         for builtin in BUILTIN_FUNCTIONS {
@@ -115,6 +117,11 @@ impl<'a> Codegen<'a> {
         let id = self.id_counter;
         self.id_counter += 1;
         id
+    }
+
+    fn enter_block(&mut self, id: usize) {
+        pushln!(self, "b{id}:");
+        self.current_block = id;
     }
 
     fn generate(&mut self) {
@@ -203,6 +210,9 @@ impl<'a> Codegen<'a> {
             }
         }
         pushln!(self, ") {{");
+        let start_block = self.next_id();
+        pushln!(self, "b{start_block}:");
+        self.current_block = start_block;
 
         for stack_id in 0..function.stack_locals {
             pushln!(self, "  %s{stack_id} = alloca i64, align 8");
@@ -246,11 +256,9 @@ impl<'a> Codegen<'a> {
             Stmt::Let { id, expr } => {
                 let value = self.expr(expr);
                 match id {
-                    Local::Stack(stack_id) => {
-                        pushln!(self, "  store i64 %v{value}, ptr %s{stack_id}, align 8")
-                    }
+                    Local::Stack(stack_id) => self.store_stack_variable(*stack_id, value),
                     Local::Transient(transient_id) => {
-                        pushln!(self, "  store i64 %v{value}, ptr %t{transient_id}, align 8")
+                        self.store_transient_variable(*transient_id, value)
                     }
                 }
             }
@@ -258,6 +266,14 @@ impl<'a> Codegen<'a> {
                 self.expr(expr);
             }
         }
+    }
+
+    fn store_stack_variable(&mut self, stack_id: StaticId, value: ValueId) {
+        pushln!(self, "  store i64 %v{value}, ptr %s{stack_id}, align 8")
+    }
+
+    fn store_transient_variable(&mut self, transient_id: TransientId, value: ValueId) {
+        pushln!(self, "  store i64 %v{value}, ptr %t{transient_id}, align 8")
     }
 
     fn expr(&mut self, expr: &Expr) -> ValueId {
@@ -513,17 +529,100 @@ impl<'a> Codegen<'a> {
     }
 
     fn if_expr(&mut self, test: &Expr, if_block: &Block, else_block: Option<&Block>) -> ValueId {
-        todo!()
+        let if_label = self.next_id();
+        let else_label = self.next_id();
+        let final_label = self.next_id();
+
+        let test_value = self.expr(test);
+        let i1_value = self.next_id();
+        pushln!(self, "  %v{i1_value} = icmp ne i64 %v{test_value}, 0");
+        pushln!(
+            self,
+            "  br i1 %v{i1_value}, label %b{if_label}, label %b{else_label}"
+        );
+
+        self.enter_block(if_label);
+        let if_value = self.block(if_block);
+        pushln!(self, "  br label %b{final_label}");
+        let final_if_label = self.current_block;
+
+        self.enter_block(else_label);
+        let else_value = if let Some(else_block) = else_block {
+            self.block(else_block)
+        } else {
+            self.int_literal(0)
+        };
+        pushln!(self, "  br label %b{final_label}");
+        let final_else_label = self.current_block;
+
+        self.enter_block(final_label);
+        let id = self.next_id();
+        pushln!(
+            self,
+            "  %v{id} = phi i64 [ %v{if_value}, %b{final_if_label} ], [ %v{else_value}, %b{final_else_label} ]"
+        );
+        id
     }
 
     fn for_expr(
         &mut self,
         init: Option<&ForInit>,
         test: Option<&Expr>,
-        udpate: Option<&Expr>,
+        update: Option<&Expr>,
         block: &Block,
     ) -> ValueId {
-        todo!()
+        match init {
+            Some(ForInit::Let { id, expr }) => {
+                let value = self.expr(expr);
+                match id {
+                    Local::Stack(stack_id) => self.store_stack_variable(*stack_id, value),
+                    Local::Transient(transient_id) => {
+                        self.store_transient_variable(*transient_id, value)
+                    }
+                }
+            }
+            Some(ForInit::Expr(expr)) => {
+                self.expr(expr);
+            }
+            None => {}
+        }
+
+        let for_body = self.next_id();
+        let final_label = self.next_id();
+
+        if let Some(test) = test {
+            let test_value = self.expr(test);
+            let i1_value = self.next_id();
+            pushln!(self, "  %v{i1_value} = icmp ne i64 %v{test_value}, 0");
+            pushln!(
+                self,
+                "  br i1 %v{i1_value}, label %b{for_body}, label %b{final_label}"
+            );
+        } else {
+            pushln!(self, "  br label %b{for_body}");
+        }
+
+        self.enter_block(for_body);
+        self.block(block);
+
+        if let Some(update) = update {
+            self.expr(update);
+        }
+
+        if let Some(test) = test {
+            let test_value = self.expr(test);
+            let i1_value = self.next_id();
+            pushln!(self, "  %v{i1_value} = icmp ne i64 %v{test_value}, 0");
+            pushln!(
+                self,
+                "  br i1 %v{i1_value}, label %b{for_body}, label %b{final_label}"
+            );
+        } else {
+            pushln!(self, "  br label %b{for_body}");
+        }
+
+        self.enter_block(final_label);
+        self.int_literal(0)
     }
 
     fn int_to_ptr(&mut self, value: ValueId) -> ValueId {

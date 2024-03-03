@@ -1,0 +1,7 @@
+fn main() {
+	for (;;) {
+		let in = stdin();
+		puts(in);
+		free(in);
+	}
+}
