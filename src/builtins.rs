@@ -53,12 +53,16 @@ const FREE_BODY: &str = r"{
 const PUTC_BODY: &str = r"{
   %2 = call i32 (ptr, ...) @printf(ptr @percent_lc, i64 %0)
   %3 = sext i32 %2 to i64
+  %4 = load ptr, ptr @__stdoutp, align 8
+  %5 = call i32 @fflush(ptr %4)
   ret i64 %3
 }";
 
 const PUTD_BODY: &str = r"{
   %2 = call i32 (ptr, ...) @printf(ptr @percent_ld, i64 %0)
   %3 = sext i32 %2 to i64
+  %4 = load ptr, ptr @__stdoutp, align 8
+  %5 = call i32 @fflush(ptr %4)
   ret i64 %3
 }";
 
@@ -66,6 +70,8 @@ const PUTS_BODY: &str = r"{
   %2 = inttoptr i64 %0 to ptr
   %3 = call i32 (ptr, ...) @printf(ptr @percent_s, ptr %2)
   %4 = sext i32 %3 to i64
+  %5 = load ptr, ptr @__stdoutp, align 8
+  %6 = call i32 @fflush(ptr %5)
   ret i64 %4
 }";
 

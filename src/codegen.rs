@@ -11,6 +11,7 @@ use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, Function, Stati
 
 const RASM_PREFIX: &str = "$";
 const PRELUDE: &str = r#"
+@__stdoutp= external global ptr, align 8
 @__stdinp = external global ptr, align 8
 
 declare i32 @printf(ptr, ...)
@@ -18,6 +19,7 @@ declare i64 @getline(ptr, ptr, ptr)
 declare ptr @malloc(i64)
 declare void @free(ptr)
 declare ptr @setlocale(i32, ptr)
+declare i32 @fflush(ptr)
 
 @percent_lc = constant [4 x i8] c"%lc\00", align 1
 @percent_ld = constant [4 x i8] c"%ld\00", align 1
