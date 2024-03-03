@@ -7,6 +7,11 @@ let unicode = "hello, გთხოვთ\tコンニチハ\"\\\n";
 
 fn two() { 2 }
 
+fn fma(x, y, z) {
+	&y;
+	x + y * z;
+}
+
 fn main(argc, argv) {
 	argc + argv + stack
 }

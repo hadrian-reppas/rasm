@@ -1,0 +1,13 @@
+fn add(x, y) {
+	puts("x: ");
+	putd(x);
+	puts("\ny: ");
+	putd(y);
+	puts("\nexpr: ");
+	putd(x + y * 3 / 4 >>> 5);
+	puts("\n")
+}
+
+fn main(argc, argv) {
+	add(argc, argv)
+}
