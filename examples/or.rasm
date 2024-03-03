@@ -1,0 +1,9 @@
+fn main() {
+	{
+		puts("HERE!\n");
+		2
+	} || {
+		puts("THERE!\n");
+		6
+	}
+}

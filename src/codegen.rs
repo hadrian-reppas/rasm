@@ -36,8 +36,6 @@ pub fn generate(resolved: &Resolved, init_order: &[StaticId]) -> Result<NamedTem
 
     codegen.generate();
 
-    println!("{}", codegen.llvm);
-
     let mut file = NamedTempFile::with_prefix(".ll")
         .map_err(|_| Error::msg("cannot create temporary llvm file"))?;
     file.write(codegen.llvm.as_bytes())
@@ -451,11 +449,71 @@ impl<'a> Codegen<'a> {
     }
 
     fn logical_and_expr(&mut self, lhs: &Expr, rhs: &Expr) -> ValueId {
-        todo!()
+        let rhs_label = self.next_id();
+        let final_label = self.next_id();
+
+        let lhs_value = self.expr(lhs);
+        let final_lhs_label = self.current_block;
+        let lhs_i1_value = self.next_id();
+        pushln!(self, "  %v{lhs_i1_value} = icmp ne i64 %v{lhs_value}, 0");
+        pushln!(
+            self,
+            "  br i1 %v{lhs_i1_value}, label %b{rhs_label}, label %b{final_label}"
+        );
+
+        self.enter_block(rhs_label);
+        let rhs_value = self.expr(rhs);
+        let final_rhs_label = self.current_block;
+        let rhs_i1_value = self.next_id();
+        pushln!(self, "  %v{rhs_i1_value} = icmp ne i64 %v{rhs_value}, 0");
+        let i1_zext_value = self.next_id();
+        pushln!(
+            self,
+            "  %v{i1_zext_value} = zext i1 %v{rhs_i1_value} to i64"
+        );
+        pushln!(self, "  br label %b{final_label}");
+
+        self.enter_block(final_label);
+        let value = self.next_id();
+        pushln!(
+            self,
+            "  %v{value} = phi i64 [ 0, %b{final_lhs_label} ], [ %v{i1_zext_value}, %b{final_rhs_label} ]"
+        );
+        value
     }
 
     fn logical_or_expr(&mut self, lhs: &Expr, rhs: &Expr) -> ValueId {
-        todo!()
+        let rhs_label = self.next_id();
+        let final_label = self.next_id();
+
+        let lhs_value = self.expr(lhs);
+        let final_lhs_label = self.current_block;
+        let lhs_i1_value = self.next_id();
+        pushln!(self, "  %v{lhs_i1_value} = icmp ne i64 %v{lhs_value}, 0");
+        pushln!(
+            self,
+            "  br i1 %v{lhs_i1_value}, label %b{final_label}, label %b{rhs_label}"
+        );
+
+        self.enter_block(rhs_label);
+        let rhs_value = self.expr(rhs);
+        let final_rhs_label = self.current_block;
+        let rhs_i1_value = self.next_id();
+        pushln!(self, "  %v{rhs_i1_value} = icmp ne i64 %v{rhs_value}, 0");
+        let i1_zext_value = self.next_id();
+        pushln!(
+            self,
+            "  %v{i1_zext_value} = zext i1 %v{rhs_i1_value} to i64"
+        );
+        pushln!(self, "  br label %b{final_label}");
+
+        self.enter_block(final_label);
+        let value = self.next_id();
+        pushln!(
+            self,
+            "  %v{value} = phi i64 [ 1, %b{final_lhs_label} ], [ %v{i1_zext_value}, %b{final_rhs_label} ]"
+        );
+        value
     }
 
     fn unary_expr(&mut self, op: UnaryOp, expr: &Expr) -> ValueId {
