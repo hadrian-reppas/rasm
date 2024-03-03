@@ -233,6 +233,14 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    fn convert_local_id_to_assign_expr(&mut self, local_id: LocalId) -> resolved::AssignTargetExpr {
+        let id = self.convert_local_id(local_id);
+        match id {
+            Local::Stack(stack_id) => resolved::AssignTargetExpr::Stack(stack_id),
+            Local::Transient(transient_id) => resolved::AssignTargetExpr::Transient(transient_id),
+        }
+    }
+
     fn resolve(&mut self, name: &ast::Name) -> Result<Variable, Error> {
         for frame in self.variable_stack.iter().rev() {
             if let Some(id) = frame.get(&name.name) {
@@ -414,14 +422,11 @@ impl<'a> Resolver<'a> {
         let mut stmts = Vec::new();
         for stmt in block.stmts {
             let converted_stmt = match stmt {
-                ast::Stmt::Let { expr, local_id, .. } => {
-                    let id = self.convert_local_id(local_id.unwrap());
-                    resolved::Stmt::Let {
-                        id,
-                        expr: self.convert_expr(expr)?,
-                    }
-                }
-                ast::Stmt::Expr(expr) => resolved::Stmt::Expr(self.convert_expr(expr)?),
+                ast::Stmt::Let { expr, local_id, .. } => resolved::Expr::Assign {
+                    target: self.convert_local_id_to_assign_expr(local_id.unwrap()),
+                    rhs: Box::new(self.convert_expr(expr)?),
+                },
+                ast::Stmt::Expr(expr) => self.convert_expr(expr)?,
             };
             stmts.push(converted_stmt);
         }
@@ -514,14 +519,12 @@ impl<'a> Resolver<'a> {
             } => {
                 let init = match init {
                     Some(ast::ForInit::Let { expr, local_id, .. }) => {
-                        Some(resolved::ForInit::Let {
-                            id: self.convert_local_id(local_id.unwrap()),
-                            expr: Box::new(self.convert_expr(*expr)?),
-                        })
+                        Some(Box::new(resolved::Expr::Assign {
+                            target: self.convert_local_id_to_assign_expr(local_id.unwrap()),
+                            rhs: Box::new(self.convert_expr(*expr)?),
+                        }))
                     }
-                    Some(ast::ForInit::Expr(expr)) => {
-                        Some(resolved::ForInit::Expr(Box::new(self.convert_expr(*expr)?)))
-                    }
+                    Some(ast::ForInit::Expr(expr)) => Some(Box::new(self.convert_expr(*expr)?)),
                     None => None,
                 };
                 let test = if let Some(test) = test {

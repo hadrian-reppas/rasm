@@ -1,5 +1,5 @@
 fn main() {
-	for (;;) {
+	for (let i = 1; i <= 10; i += 1) {
 		let in = stdin();
 		puts(in);
 		free(in);

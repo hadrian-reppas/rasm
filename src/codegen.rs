@@ -6,8 +6,8 @@ use tempfile::NamedTempFile;
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
 use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
-use crate::resolve::{FunctionId, Local, Resolved, StaticId, StringId, TransientId};
-use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, ForInit, Function, Static, Stmt};
+use crate::resolve::{FunctionId, Local, Resolved, StackId, StaticId, StringId, TransientId};
+use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, Function, Static};
 
 const RASM_PREFIX: &'static str = "$";
 const PRELUDE: &'static str = r#"
@@ -241,7 +241,7 @@ impl<'a> Codegen<'a> {
 
     fn block(&mut self, block: &Block) -> ValueId {
         for stmt in &block.stmts {
-            self.stmt(stmt);
+            self.expr(stmt);
         }
 
         if let Some(expr) = &block.expr {
@@ -251,39 +251,14 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn stmt(&mut self, stmt: &Stmt) {
-        match stmt {
-            Stmt::Let { id, expr } => {
-                let value = self.expr(expr);
-                match id {
-                    Local::Stack(stack_id) => self.store_stack_variable(*stack_id, value),
-                    Local::Transient(transient_id) => {
-                        self.store_transient_variable(*transient_id, value)
-                    }
-                }
-            }
-            Stmt::Expr(expr) => {
-                self.expr(expr);
-            }
-        }
-    }
-
-    fn store_stack_variable(&mut self, stack_id: StaticId, value: ValueId) {
-        pushln!(self, "  store i64 %v{value}, ptr %s{stack_id}, align 8")
-    }
-
-    fn store_transient_variable(&mut self, transient_id: TransientId, value: ValueId) {
-        pushln!(self, "  store i64 %v{value}, ptr %t{transient_id}, align 8")
-    }
-
     fn expr(&mut self, expr: &Expr) -> ValueId {
         match expr {
             Expr::String(string_id) => self.string_literal(*string_id),
             Expr::Int(value) => self.int_literal(*value),
             Expr::Static(static_id) => self.load_static(*static_id),
             Expr::Function(function_id) => self.function_ref(*function_id),
-            Expr::Stack(stack_id) => self.variable(*stack_id, "s"),
-            Expr::Transient(transient_id) => self.variable(*transient_id, "t"),
+            Expr::Stack(stack_id) => self.load_stack_variable(*stack_id),
+            Expr::Transient(transient_id) => self.load_transient_variable(*transient_id),
             Expr::Block(block) => self.block(block),
             Expr::AddrOf(expr) => self.addr_of_expr(expr),
             Expr::Binary { op, lhs, rhs } => self.binary_expr(*op, lhs, rhs),
@@ -302,7 +277,7 @@ impl<'a> Codegen<'a> {
                 test,
                 update,
                 block,
-            } => self.for_expr(init.as_ref(), test.as_deref(), update.as_deref(), block),
+            } => self.for_expr(init.as_deref(), test.as_deref(), update.as_deref(), block),
             Expr::Return(expr) => {
                 if let Some(expr) = expr {
                     let value = self.expr(expr);
@@ -335,6 +310,14 @@ impl<'a> Codegen<'a> {
         id
     }
 
+    fn store_static(&mut self, static_id: StaticId, value: ValueId) {
+        pushln!(
+            self,
+            "  store i64 %v{value}, ptr @{RASM_PREFIX}{}, align 8",
+            self.statics[static_id].name
+        );
+    }
+
     fn function_name(&self, function_id: FunctionId) -> &'a str {
         if let Some(builtin) = BUILTIN_FUNCTIONS.get(function_id) {
             builtin.name
@@ -353,13 +336,24 @@ impl<'a> Codegen<'a> {
         id
     }
 
-    fn variable(&mut self, variable_id: usize, prefix: &str) -> ValueId {
+    fn load_stack_variable(&mut self, stack_id: StackId) -> ValueId {
         let id = self.next_id();
-        pushln!(
-            self,
-            "  %v{id} = load i64, ptr %{prefix}{variable_id}, align 8"
-        );
+        pushln!(self, "  %v{id} = load i64, ptr %s{stack_id}, align 8");
         id
+    }
+
+    fn load_transient_variable(&mut self, transient_id: TransientId) -> ValueId {
+        let id = self.next_id();
+        pushln!(self, "  %v{id} = load i64, ptr %t{transient_id}, align 8");
+        id
+    }
+
+    fn store_stack_variable(&mut self, stack_id: StaticId, value: ValueId) {
+        pushln!(self, "  store i64 %v{value}, ptr %s{stack_id}, align 8")
+    }
+
+    fn store_transient_variable(&mut self, transient_id: TransientId, value: ValueId) {
+        pushln!(self, "  store i64 %v{value}, ptr %t{transient_id}, align 8")
     }
 
     fn addr_of_expr(&mut self, expr: &AddrOfExpr) -> ValueId {
@@ -484,11 +478,94 @@ impl<'a> Codegen<'a> {
     }
 
     fn assign_expr(&mut self, target: &AssignTargetExpr, rhs: &Expr) -> ValueId {
-        todo!()
+        let value = self.expr(rhs);
+        match target {
+            AssignTargetExpr::Static(static_id) => self.store_static(*static_id, value),
+            AssignTargetExpr::Stack(stack_id) => self.store_stack_variable(*stack_id, value),
+            AssignTargetExpr::Transient(transient_id) => {
+                self.store_transient_variable(*transient_id, value)
+            }
+            AssignTargetExpr::Deref(expr) => {
+                let addr_value = self.expr(expr);
+                let addr_ptr = self.int_to_ptr(addr_value);
+                pushln!(self, "  store i64 %v{value}, ptr %v{addr_ptr}, align 8");
+            }
+            AssignTargetExpr::Index { target, index } => {
+                let addr_ptr = self.index_addr(target, index);
+                pushln!(self, "  store i64 %v{value}, ptr %v{addr_ptr}, align 8");
+            }
+        }
+        value
     }
 
     fn assign_op_expr(&mut self, op: AssignOp, target: &AssignTargetExpr, rhs: &Expr) -> ValueId {
-        todo!()
+        macro_rules! do_op {
+            ($old:expr, $rhs:expr) => {{
+                let instr = match op {
+                    AssignOp::Mul => "mul",
+                    AssignOp::Div => "sdiv",
+                    AssignOp::Mod => "srem",
+                    AssignOp::Add => "add",
+                    AssignOp::Sub => "sub",
+                    AssignOp::Shl => "shl",
+                    AssignOp::ArithmeticShr => "ashr",
+                    AssignOp::LogicalShr => "lshr",
+                    AssignOp::BitAnd => "and",
+                    AssignOp::BitXor => "xor",
+                    AssignOp::BitOr => "or",
+                };
+
+                let value = self.next_id();
+                pushln!(self, "  %v{value} = {instr} i64 %v{}, %v{}", $old, $rhs);
+                value
+            }};
+        }
+
+        let rhs_value = self.expr(rhs);
+
+        match target {
+            AssignTargetExpr::Static(static_id) => {
+                let old_value = self.load_static(*static_id);
+                let value = do_op!(old_value, rhs_value);
+                self.store_static(*static_id, value);
+                value
+            }
+            AssignTargetExpr::Stack(stack_id) => {
+                let old_value = self.load_stack_variable(*stack_id);
+                let value = do_op!(old_value, rhs_value);
+                self.store_stack_variable(*stack_id, value);
+                value
+            }
+            AssignTargetExpr::Transient(transient_id) => {
+                let old_value = self.load_transient_variable(*transient_id);
+                let value = do_op!(old_value, rhs_value);
+                self.store_transient_variable(*transient_id, value);
+                value
+            }
+            AssignTargetExpr::Deref(expr) => {
+                let addr_value = self.expr(expr);
+                let addr_ptr = self.int_to_ptr(addr_value);
+                let old_value = self.next_id();
+                pushln!(
+                    self,
+                    "  %v{old_value} = load i64, ptr %v{addr_ptr}, align 8"
+                );
+                let value = do_op!(old_value, rhs_value);
+                pushln!(self, "  store i64 %v{value}, ptr %v{addr_ptr}, align 8");
+                value
+            }
+            AssignTargetExpr::Index { target, index } => {
+                let addr_ptr = self.index_addr(target, index);
+                let old_value = self.next_id();
+                pushln!(
+                    self,
+                    "  %v{old_value} = load i64, ptr %v{addr_ptr}, align 8"
+                );
+                let value = do_op!(old_value, rhs_value);
+                pushln!(self, "  store i64 %v{value}, ptr %v{addr_ptr}, align 8");
+                value
+            }
+        }
     }
 
     fn index_addr(&mut self, target: &Expr, index: &Expr) -> ValueId {
@@ -566,25 +643,13 @@ impl<'a> Codegen<'a> {
 
     fn for_expr(
         &mut self,
-        init: Option<&ForInit>,
+        init: Option<&Expr>,
         test: Option<&Expr>,
         update: Option<&Expr>,
         block: &Block,
     ) -> ValueId {
-        match init {
-            Some(ForInit::Let { id, expr }) => {
-                let value = self.expr(expr);
-                match id {
-                    Local::Stack(stack_id) => self.store_stack_variable(*stack_id, value),
-                    Local::Transient(transient_id) => {
-                        self.store_transient_variable(*transient_id, value)
-                    }
-                }
-            }
-            Some(ForInit::Expr(expr)) => {
-                self.expr(expr);
-            }
-            None => {}
+        if let Some(init) = init {
+            self.expr(init);
         }
 
         let for_body = self.next_id();
