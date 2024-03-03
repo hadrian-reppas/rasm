@@ -1,0 +1,14 @@
+let two = {
+	let one = 1;
+	increment(&one);
+	one
+};
+
+fn increment(ptr) {
+	let value = *ptr + 1;
+	*ptr = value;
+}
+
+fn main() {
+	putd(two);
+}

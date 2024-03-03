@@ -1,7 +1,8 @@
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 mod ast;
 mod builtins;
+mod codegen;
 mod error;
 mod lex;
 mod parse;
@@ -30,12 +31,37 @@ fn compile(maybe_input: Option<&str>, output_file: &str) -> Result<(), error::Er
     };
 
     let code = std::fs::read_to_string(input_file)
-        .map_err(|_| error::Error::msg("cannot read file {input_file:?}"))?
+        .map_err(|_| error::Error::msg(format!("cannot read file {input_file:?}")))?
         .leak();
 
     let items = parse::parse(code)?;
     let resolved = resolve::resolve(items)?;
-    let order = toposort::static_initialization_order(&resolved)?;
+    let init_order = toposort::static_initialization_order(&resolved)?;
 
-    todo!()
+    let llvm_file = codegen::generate(&resolved, &init_order)?;
+    let object_file = tempfile::NamedTempFile::with_prefix(".o")
+        .map_err(|_| error::Error::msg("cannot create temporary object file"))?;
+
+    let llc_status = Command::new("llc")
+        .arg(llvm_file.path())
+        .arg("-filetype=obj")
+        .arg("-o")
+        .arg(object_file.path())
+        .status()
+        .map_err(|_| error::Error::msg("cannot invoke llc"))?;
+    if !llc_status.success() {
+        return Err(error::Error::msg("llc failed with a nonzero exit code"));
+    }
+
+    let cc_status = Command::new("cc")
+        .arg(object_file.path())
+        .arg("-o")
+        .arg(output_file)
+        .status()
+        .map_err(|_| error::Error::msg("cannot invoke linker"))?;
+    if !cc_status.success() {
+        return Err(error::Error::msg("cc failed with a nonzero exit code"));
+    }
+
+    Ok(())
 }

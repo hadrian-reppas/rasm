@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::builtins::{BUILTIN_FUNCTIONS, BUILTIN_STRINGS};
+use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
 use crate::{ast, resolved};
 
@@ -42,12 +42,7 @@ pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
     let (static_names, function_names) = make_statics_and_functions(&items)?;
     let mut statics = Vec::new();
     let mut functions = Vec::new();
-    let mut strings: HashMap<_, _> = BUILTIN_STRINGS
-        .iter()
-        .copied()
-        .map(String::from)
-        .zip(0..)
-        .collect();
+    let mut strings = HashMap::new();
 
     for item in items {
         match resolve_item(item, &static_names, &function_names, &mut strings)? {
@@ -76,7 +71,7 @@ fn make_statics_and_functions(
     let mut statics = HashMap::new();
     let mut functions: HashMap<_, _> = BUILTIN_FUNCTIONS
         .iter()
-        .map(ToString::to_string)
+        .map(|func| func.name.to_string())
         .zip(0..)
         .collect();
 
@@ -116,21 +111,26 @@ fn resolve_item(
         } => {
             let mut resolver = Resolver::with_params(&params, statics, functions, strings)?;
             resolver.visit_block(&mut block)?;
-            let params = params
+            let params: Vec<_> = params
                 .iter()
                 .map(|param| resolver.convert_local_id(resolver.variable_stack[0][&param.name]))
                 .collect();
-            Ok(resolved::Item::Function(resolved::Function {
-                name: name.name.to_string(),
-                span: name.span,
-                id: functions[&name.name],
-                params,
-                block: resolver.convert_block(block)?,
-                transient_locals: resolver.transient_map.len(),
-                stack_locals: resolver.max_stack_locals,
-                static_dependencies: resolver.static_dependencies.into_iter().collect(),
-                function_dependencies: resolver.function_dependencies.into_iter().collect(),
-            }))
+
+            if name.name == "main" && !params.is_empty() && params.len() != 2 {
+                Err(Error::new(name.span, "`main` must have 0 or 2 parameters"))
+            } else {
+                Ok(resolved::Item::Function(resolved::Function {
+                    name: name.name.to_string(),
+                    span: name.span,
+                    id: functions[&name.name],
+                    params,
+                    block: resolver.convert_block(block)?,
+                    transient_locals: resolver.transient_map.len(),
+                    stack_locals: resolver.max_stack_locals,
+                    static_dependencies: resolver.static_dependencies.into_iter().collect(),
+                    function_dependencies: resolver.function_dependencies.into_iter().collect(),
+                }))
+            }
         }
         ast::Item::Static { name, mut expr } => {
             let mut resolver = Resolver::new(statics, functions, strings);
