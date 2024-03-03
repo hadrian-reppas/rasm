@@ -9,8 +9,8 @@ use crate::error::Error;
 use crate::resolve::{FunctionId, Local, Resolved, StackId, StaticId, StringId, TransientId};
 use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, Function, Static};
 
-const RASM_PREFIX: &'static str = "$";
-const PRELUDE: &'static str = r#"
+const RASM_PREFIX: &str = "$";
+const PRELUDE: &str = r#"
 @__stdinp = external global ptr, align 8
 
 declare i32 @printf(ptr, ...)
@@ -222,7 +222,7 @@ impl<'a> Codegen<'a> {
         for (param_id, param) in function.params.iter().enumerate() {
             match param {
                 Local::Stack(stack_id) => {
-                    pushln!(self, "  store i64 %p{param_id}, ptr %s{stack_id}, align 8")
+                    pushln!(self, "  store i64 %p{param_id}, ptr %s{stack_id}, align 8");
                 }
                 Local::Transient(transient_id) => pushln!(
                     self,
@@ -347,11 +347,11 @@ impl<'a> Codegen<'a> {
     }
 
     fn store_stack_variable(&mut self, stack_id: StaticId, value: ValueId) {
-        pushln!(self, "  store i64 %v{value}, ptr %s{stack_id}, align 8")
+        pushln!(self, "  store i64 %v{value}, ptr %s{stack_id}, align 8");
     }
 
     fn store_transient_variable(&mut self, transient_id: TransientId, value: ValueId) {
-        pushln!(self, "  store i64 %v{value}, ptr %t{transient_id}, align 8")
+        pushln!(self, "  store i64 %v{value}, ptr %t{transient_id}, align 8");
     }
 
     fn addr_of_expr(&mut self, expr: &AddrOfExpr) -> ValueId {
@@ -541,7 +541,7 @@ impl<'a> Codegen<'a> {
             AssignTargetExpr::Static(static_id) => self.store_static(*static_id, value),
             AssignTargetExpr::Stack(stack_id) => self.store_stack_variable(*stack_id, value),
             AssignTargetExpr::Transient(transient_id) => {
-                self.store_transient_variable(*transient_id, value)
+                self.store_transient_variable(*transient_id, value);
             }
             AssignTargetExpr::Deref(expr) => {
                 let addr_value = self.expr(expr);
@@ -765,7 +765,7 @@ impl<'a> Codegen<'a> {
             if matches!(byte, b' ' | b'!' | b'#'..=b'[' | b']'..=b'~') {
                 self.llvm.push(byte.try_into().unwrap());
             } else {
-                push!(self, "\\{:02x}", byte)
+                push!(self, "\\{:02x}", byte);
             }
         }
     }
