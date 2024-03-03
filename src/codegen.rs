@@ -17,9 +17,12 @@ declare i32 @printf(ptr, ...)
 declare i64 @getline(ptr, ptr, ptr)
 declare ptr @malloc(i64)
 declare void @free(ptr)
+declare ptr @setlocale(i32, ptr)
 
+@percent_lc = constant [4 x i8] c"%lc\00", align 1
 @percent_ld = constant [4 x i8] c"%ld\00", align 1
 @percent_s = constant [3 x i8] c"%s\00", align 1
+@empty_str = constant [1 x i8] c"\00", align 1
 
 "#;
 
@@ -160,6 +163,7 @@ impl<'a> Codegen<'a> {
         for transient_id in 0..transient_locals {
             pushln!(self, "  %t{transient_id} = alloca i64, align 8");
         }
+        pushln!(self, "  %x = call ptr @setlocale(i32 0, ptr @empty_str)");
 
         pushln!(self, "  ; TODO: initialize statics");
 
@@ -312,7 +316,7 @@ impl<'a> Codegen<'a> {
         if let Some(builtin) = BUILTIN_FUNCTIONS.get(function_id) {
             builtin.name
         } else {
-            &self.functions[function_id - 5].name
+            &self.functions[function_id - BUILTIN_FUNCTIONS.len()].name
         }
     }
 

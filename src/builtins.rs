@@ -16,6 +16,11 @@ pub const BUILTIN_FUNCTIONS: &'static [BuiltinFunction] = &[
         body: FREE_BODY,
     },
     BuiltinFunction {
+        name: "putc",
+        params: 1,
+        body: PUTC_BODY,
+    },
+    BuiltinFunction {
         name: "putd",
         params: 1,
         body: PUTD_BODY,
@@ -43,6 +48,12 @@ const FREE_BODY: &'static str = r#"{
   %2 = inttoptr i64 %0 to ptr
   call void @free(ptr %2)
   ret i64 0
+}"#;
+
+const PUTC_BODY: &'static str = r#"{
+  %2 = call i32 (ptr, ...) @printf(ptr @percent_lc, i64 %0)
+  %3 = sext i32 %2 to i64
+  ret i64 %3
 }"#;
 
 const PUTD_BODY: &'static str = r#"{
