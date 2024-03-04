@@ -1,0 +1,189 @@
+fn load_byte(ptr) {
+	let base = ptr & ~7;
+	let offset = ptr & 7;
+	(*base >> 8 * offset) & 255
+}
+
+fn store_byte(ptr, byte) {
+	let base = ptr & ~7;
+	let offset = ptr & 7;
+	let old = *base;
+
+	let mask = ~(255 << 8 * offset);
+	let shifted = byte << 8 * offset;
+	let new = old & mask | shifted;
+	*base = new;
+}
+
+fn strlen(s) {
+	let ptr = s;
+	for (; load_byte(ptr);) { ptr += 1; }
+	ptr - s
+}
+
+fn strcpy(dst, src) {
+	let byte = 1;
+	for (; byte;) {
+		byte = load_byte(src);
+		store_byte(dst, byte);
+		src += 1;
+		dst += 1;
+	}
+}
+
+let LENGTH = 0;
+let CAPACITY = 1;
+let BUFFER = 2;
+
+fn empty() {
+	let string = alloc(3);
+	string[LENGTH] = 0;
+	string[CAPACITY] = 32;
+	string[BUFFER] = alloc(4);
+	string[BUFFER][0] = 0;
+	string
+}
+
+fn from_cstring(str) {
+	let length = strlen(str);
+	let words = (length + 8) / 8;
+	let buffer = alloc(words);
+	for (let i = 0; i <= length; i += 1) {
+		store_byte(buffer + i, load_byte(str + i));
+	}
+
+	let string = alloc(3);
+	string[LENGTH] = length;
+	string[CAPACITY] = 8 * words;
+	string[BUFFER] = buffer;
+
+	string
+}
+
+fn free_(string) {
+	free(string[BUFFER]);
+	free(string);
+}
+
+fn max(a, b) {
+	if (a > b) {
+		a
+	} else {
+		b
+	}
+}
+
+fn grow(string, min_capacity) {
+	min_capacity = 8 * ((min_capacity + 8) / 8);
+	let new_capacity = max(min_capacity, 2 * string[CAPACITY]);
+	let new_buffer = alloc(new_capacity / 8);
+	strcpy(new_buffer, string[BUFFER]);
+	string[CAPACITY] = new_capacity;
+	free(string[BUFFER]);
+	string[BUFFER] = new_buffer;
+}
+
+fn push(string, c) {
+	let c_length = utf8_length(c);
+	let new_length = string[LENGTH] + c_length;
+
+	if (new_length + 1 > string[CAPACITY]) {
+		grow(string, new_length + 1);
+	}
+
+	let bytes = as_utf8_bytes(c);
+	for (let i = 0; i <= c_length; i += 1) {
+		let j = c_length - i - 1;
+		let byte = (bytes >> 8 * j) & 255;
+		store_byte(string[BUFFER] + string[LENGTH] + i, byte);
+	}
+	string[LENGTH] = new_length;
+}
+
+fn push_cstring(string, str) {
+	let length = strlen(str);
+	let new_length = string[LENGTH] + length;
+
+	if (new_length + 1 > string[CAPACITY]) {
+		grow(string, new_length + 1);
+	}
+
+	strcpy(string[BUFFER] + string[LENGTH], str);
+	string[LENGTH] = new_length;
+}
+
+fn utf8_length(c) {
+	if (c <= 127) {
+		1
+	} else if (c <= 2047) {
+		2
+	} else if (c <= 65535) {
+		3
+	} else if (c <= 1114111) {
+		4
+	}
+}
+
+fn first_char(str) {
+	let byte = load_byte(str);
+	if (byte & 128 == 0) {
+		byte
+	} else if (byte & 224 == 192) {
+		from_utf8_bytes_2(byte, load_byte(str + 1))
+	} else if (byte & 240 == 224) {
+		from_utf8_bytes_3(byte, load_byte(str + 1), load_byte(str + 2))
+	} else if (byte & 248 == 240) {
+		from_utf8_bytes_4(byte, load_byte(str + 1), load_byte(str + 2), load_byte(str + 3))
+	}
+}
+
+fn from_utf8_bytes_2(a, b) {
+	(a & 31) << 6 | (b & 63)
+}
+
+fn from_utf8_bytes_3(a, b, c) {
+	(a & 15) << 12 | (b & 63) << 6 | (c & 63)
+}
+
+fn from_utf8_bytes_4(a, b, c, d) {
+	(a & 7) << 18 | (b & 63) << 12 | (c & 63) << 6 | (d & 63)
+}
+
+fn as_utf8_bytes(c) {
+	let length = utf8_length(c);
+	if (length == 1) {
+		c
+	} else if (length == 2) {
+		((c & 1984) << 2) | (c & 63) | 49280
+	} else if (length == 3) {
+		((c & 61440) << 4) | ((c & 4032) << 2) | (c & 63) | 14712960
+	} else if (length == 4) {
+		((c & 1835008) << 6) | ((c & 258048) << 4) | ((c & 4032) << 2) | (c & 63) | 4034953344
+	}
+}
+
+fn main() {
+	let hello = "Hello, world!\n";
+	let string = from_cstring(hello);
+	puts(string[BUFFER]);
+
+	let unicode = "hello, გთხოვთ 𑅰Ǵ\tコンニチハ\"\\\n";
+	let string = empty();
+
+	for (let i = 0; i < 10; i += 1) {
+		let ptr = unicode;
+		let c = 1;
+		for (; c;) {
+			c = first_char(ptr);
+			ptr += utf8_length(c);
+			if (c) { push(string, c); }
+		}
+	}
+
+	push_cstring(string, hello);
+
+	puts(string[BUFFER]);
+	puts("length: ");
+	putd(string[LENGTH]);
+	putc('\n');
+}

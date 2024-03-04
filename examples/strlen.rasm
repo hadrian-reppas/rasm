@@ -1,0 +1,29 @@
+fn deref(ptr) {
+	let base = ptr & ~7;
+	let offset = ptr & 7;
+	let full = *base;
+	(full >> 8 * offset) & 255
+}
+
+fn strlen(s) {
+	let len = 0;
+	for (; deref(s);) {
+		s += 1;
+		len += 1;
+	}
+	len
+}
+
+fn main() {
+	let len = 1;
+	for (; len > 0;) {
+		puts("> ");
+		let input = stdin();
+		len = strlen(input) - 1; // ignore newline
+		free(input);
+		
+		puts("len = ");
+		putd(len);
+		putc('\n');
+	}
+}
