@@ -1,0 +1,4 @@
+let COUNT = 10;
+
+fn lex() {}
+fn get_count() { COUNT }

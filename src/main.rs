@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
@@ -48,7 +48,10 @@ fn compile(args: &'static Arguments) -> Result<(), error::Error> {
 
     let paths = RefCell::new(HashSet::from([args.input.as_path()]));
     let items = parse::parse(code, &args.input, &paths)?;
-    let resolved = resolve::resolve(items)?;
+    let resolved = resolve::resolve(HashMap::from([
+        ("std".to_string(), Vec::new()),
+        ("crate".to_string(), items),
+    ]))?;
     let init_order = toposort::static_initialization_order(&resolved)?;
 
     let llvm_file = codegen::generate(&resolved, &init_order)?;

@@ -1,5 +1,7 @@
+use std::cell::Cell;
+
 use crate::error::Span;
-use crate::resolve::{LocalId, Variable};
+use crate::resolve::{FunctionId, LocalId, StaticId, Variable};
 
 #[derive(Debug, Clone)]
 pub enum Item {
@@ -7,10 +9,12 @@ pub enum Item {
         name: Name,
         params: Vec<Name>,
         block: Block,
+        id: Option<FunctionId>,
     },
     Static {
         name: Name,
         expr: Expr,
+        id: Option<StaticId>,
     },
     Mod {
         name: Name,
@@ -19,6 +23,7 @@ pub enum Item {
     Use {
         with_crate: bool,
         tree: UseTree,
+        done: Cell<bool>,
     },
 }
 
@@ -38,7 +43,6 @@ pub enum UseTreeKind {
 pub struct Name {
     pub name: String,
     pub span: Span,
-    pub variable_id: Option<Variable>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +53,7 @@ pub enum Expr {
         with_crate: bool,
         prefix: Vec<Name>,
         name: Name,
+        variable: Option<Variable>,
     },
     Block(Block),
     AddrOf(PlaceExpr),
@@ -98,6 +103,7 @@ pub enum PlaceExpr {
         with_crate: bool,
         prefix: Vec<Name>,
         name: Name,
+        variable: Option<Variable>,
     },
     Deref(Box<Expr>),
     Index {
@@ -114,10 +120,12 @@ impl TryFrom<Expr> for PlaceExpr {
                 with_crate,
                 prefix,
                 name,
+                variable,
             } => Ok(PlaceExpr::Path {
                 with_crate,
                 prefix,
                 name,
+                variable,
             }),
             Expr::Unary {
                 op: UnaryOp::Deref,

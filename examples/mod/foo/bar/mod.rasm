@@ -1,0 +1,3 @@
+mod baz;
+
+fn two() { 2 }

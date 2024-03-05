@@ -1,0 +1,10 @@
+mod lex;
+mod parse;
+mod foo;
+
+use foo::bar::two;
+use foo::bar::{baz::{three}, baz};
+
+fn main() {
+	foo::one() + two() + three()
+}

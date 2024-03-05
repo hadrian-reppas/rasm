@@ -1,15 +1,12 @@
+use std::collections::HashSet;
+
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
 use crate::error::Span;
 use crate::resolve::{FunctionId, Local, StackId, StaticId, StringId, TransientId};
 
 #[derive(Debug, Clone)]
-pub enum Item {
-    Function(Function),
-    Static(Static),
-}
-
-#[derive(Debug, Clone)]
 pub struct Function {
+    pub prefix: Vec<String>,
     pub name: String,
     pub span: Span,
     pub id: FunctionId,
@@ -17,20 +14,39 @@ pub struct Function {
     pub block: Block,
     pub transient_locals: usize,
     pub stack_locals: usize,
-    pub static_dependencies: Vec<StaticId>,
-    pub function_dependencies: Vec<FunctionId>,
+    pub static_dependencies: HashSet<StaticId>,
+    pub function_dependencies: HashSet<FunctionId>,
+}
+
+impl Function {
+    pub fn path(&self) -> String {
+        let mut path = self.prefix.join(".");
+        path.push('.');
+        path.push_str(&self.name);
+        path
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Static {
+    pub prefix: Vec<String>,
     pub name: String,
     pub span: Span,
     pub id: StaticId,
     pub expr: Expr,
     pub transient_locals: usize,
     pub stack_locals: usize,
-    pub static_dependencies: Vec<StaticId>,
-    pub function_dependencies: Vec<FunctionId>,
+    pub static_dependencies: HashSet<StaticId>,
+    pub function_dependencies: HashSet<FunctionId>,
+}
+
+impl Static {
+    pub fn path(&self) -> String {
+        let mut path = self.prefix.join(".");
+        path.push('.');
+        path.push_str(&self.name);
+        path
+    }
 }
 
 #[derive(Debug, Clone)]
