@@ -1,0 +1,17 @@
+use std::{string, hash_map};
+
+fn main() {
+	let map = hash_map::new(string::hash, string::eq);
+
+	let foo = string::from("foo");
+	let bar = string::from("bar");
+	let baz = string::from("baz");
+
+	hash_map::insert(map, foo, 4);
+	hash_map::insert(map, bar, 5);
+
+	let foo_value = hash_map::get(map, foo);
+	let bar_value = hash_map::get(map, bar);
+	let baz_value = hash_map::get(map, baz);
+	let baz_value_or = hash_map::get_or(map, baz, 10);
+}

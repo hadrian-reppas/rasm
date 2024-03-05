@@ -5,4 +5,6 @@ use crate::lex::token;
 use crate::constants::{width, height, area};
 use std::foo::bar::baz::{};
 
+mod string;
+
 fn main() {}

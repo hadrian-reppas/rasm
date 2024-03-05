@@ -12,7 +12,10 @@ pub enum Item {
         name: Name,
         expr: Expr,
     },
-    Mod(Name),
+    Mod {
+        name: Name,
+        items: Vec<Item>,
+    },
     Use {
         with_crate: bool,
         tree: UseTree,
@@ -44,7 +47,8 @@ pub enum Expr {
     Int(i64),
     Path {
         with_crate: bool,
-        path: Vec<Name>,
+        prefix: Vec<Name>,
+        name: Name,
     },
     Block(Block),
     AddrOf(PlaceExpr),
@@ -90,16 +94,31 @@ pub enum Expr {
 
 #[derive(Debug, Clone)]
 pub enum PlaceExpr {
-    Path { with_crate: bool, path: Vec<Name> },
+    Path {
+        with_crate: bool,
+        prefix: Vec<Name>,
+        name: Name,
+    },
     Deref(Box<Expr>),
-    Index { target: Box<Expr>, index: Box<Expr> },
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+    },
 }
 
 impl TryFrom<Expr> for PlaceExpr {
     type Error = ();
     fn try_from(expr: Expr) -> Result<Self, Self::Error> {
         match expr {
-            Expr::Path { with_crate, path } => Ok(PlaceExpr::Path { with_crate, path }),
+            Expr::Path {
+                with_crate,
+                prefix,
+                name,
+            } => Ok(PlaceExpr::Path {
+                with_crate,
+                prefix,
+                name,
+            }),
             Expr::Unary {
                 op: UnaryOp::Deref,
                 expr,

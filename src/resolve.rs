@@ -32,6 +32,13 @@ pub enum Local {
 }
 
 #[derive(Debug, Clone)]
+pub struct ModuleTree {
+    statics: HashMap<String, StaticId>,
+    functions: HashMap<String, FunctionId>,
+    modules: HashMap<String, ModuleTree>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Resolved {
     pub functions: Vec<resolved::Function>,
     pub statics: Vec<resolved::Static>,
@@ -79,7 +86,7 @@ fn make_statics_and_functions(
         let (name, is_function) = match item {
             ast::Item::Function { name, .. } => (name, true),
             ast::Item::Static { name, .. } => (name, false),
-            ast::Item::Mod(_) => todo!(),
+            ast::Item::Mod { .. } => todo!(),
             ast::Item::Use { .. } => todo!(),
         };
 
@@ -148,7 +155,7 @@ fn resolve_item(
                 function_dependencies: resolver.function_dependencies.into_iter().collect(),
             }))
         }
-        ast::Item::Mod(_) => todo!(),
+        ast::Item::Mod { .. } => todo!(),
         ast::Item::Use { .. } => todo!(),
     }
 }
@@ -325,12 +332,21 @@ impl<'a> Resolver<'a> {
     fn visit_expr(&mut self, expr: &mut ast::Expr) -> Result<(), Error> {
         match expr {
             ast::Expr::String(_) | ast::Expr::Int(_) => Ok(()),
-            ast::Expr::Path { with_crate, path } => self.visit_name(path.last_mut().unwrap()), // FIXME
+            ast::Expr::Path {
+                with_crate,
+                prefix,
+                name,
+            } => self.visit_name(name), // FIXME
             ast::Expr::Block(block) => self.visit_block(block),
             ast::Expr::AddrOf(expr) => {
-                if let ast::PlaceExpr::Path { with_crate, path } = expr {
+                if let ast::PlaceExpr::Path {
+                    with_crate,
+                    prefix,
+                    name,
+                } = expr
+                {
                     // FIXME
-                    if let Variable::Local(id) = self.resolve(path.last().unwrap())? {
+                    if let Variable::Local(id) = self.resolve(name)? {
                         self.ensure_on_stack(id);
                     }
                 }
@@ -414,7 +430,11 @@ impl<'a> Resolver<'a> {
 
     fn visit_place_expr(&mut self, expr: &mut ast::PlaceExpr) -> Result<(), Error> {
         match expr {
-            ast::PlaceExpr::Path { with_crate, path } => self.visit_name(path.last_mut().unwrap()), // FIXME
+            ast::PlaceExpr::Path {
+                with_crate,
+                prefix,
+                name,
+            } => self.visit_name(name), // FIXME
             ast::PlaceExpr::Deref(expr) => self.visit_expr(expr),
             ast::PlaceExpr::Index { target, index } => {
                 self.visit_expr(target)?;
@@ -455,9 +475,13 @@ impl<'a> Resolver<'a> {
                 }
             }
             ast::Expr::Int(int) => Ok(resolved::Expr::Int(int)),
-            ast::Expr::Path { with_crate, path } => {
+            ast::Expr::Path {
+                with_crate,
+                prefix,
+                name,
+            } => {
                 // FIXME
-                match path.last().unwrap().variable_id.unwrap() {
+                match name.variable_id.unwrap() {
                     Variable::Static(id) => Ok(resolved::Expr::Static(id)),
                     Variable::Function(id) => Ok(resolved::Expr::Function(id)),
                     Variable::Local(id) => match self.convert_local_id(id) {
@@ -561,13 +585,17 @@ impl<'a> Resolver<'a> {
         expr: ast::PlaceExpr,
     ) -> Result<resolved::AssignTargetExpr, Error> {
         match expr {
-            ast::PlaceExpr::Path { with_crate, path } => {
+            ast::PlaceExpr::Path {
+                with_crate,
+                prefix,
+                name,
+            } => {
                 // FIXME
-                match path.last().unwrap().variable_id.unwrap() {
+                match name.variable_id.unwrap() {
                     Variable::Static(id) => Ok(resolved::AssignTargetExpr::Static(id)),
                     Variable::Function(_) => Err(Error::new(
-                        path.last().unwrap().span,
-                        format!("`{}` is a function", path.last().unwrap().name), // FIXME
+                        name.span,
+                        format!("`{}` is a function", name.name), // FIXME
                     )),
                     Variable::Local(id) => match self.convert_local_id(id) {
                         Local::Stack(id) => Ok(resolved::AssignTargetExpr::Stack(id)),
@@ -591,13 +619,17 @@ impl<'a> Resolver<'a> {
         expr: ast::PlaceExpr,
     ) -> Result<resolved::AddrOfExpr, Error> {
         match expr {
-            ast::PlaceExpr::Path { with_crate, path } => {
+            ast::PlaceExpr::Path {
+                with_crate,
+                prefix,
+                name,
+            } => {
                 // FIXME
-                match path.last().unwrap().variable_id.unwrap() {
+                match name.variable_id.unwrap() {
                     Variable::Static(id) => Ok(resolved::AddrOfExpr::Static(id)),
                     Variable::Function(_) => Err(Error::new(
-                        path.last().unwrap().span,
-                        format!("`{}` is a function", path.last().unwrap().name), // FIXME
+                        name.span,
+                        format!("`{}` is a function", name.name), // FIXME
                     )),
                     Variable::Local(id) => match self.convert_local_id(id) {
                         Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),

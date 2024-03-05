@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::cell::RefCell;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use clap::Parser;
@@ -28,9 +30,9 @@ struct Arguments {
 }
 
 fn main() -> ExitCode {
-    let args = Arguments::parse();
+    let args = Box::leak(Box::new(Arguments::parse()));
 
-    match compile(&args.input, &args.output, args.release) {
+    match compile(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             error.print();
@@ -39,12 +41,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn compile(input: &Path, output: &Path, release: bool) -> Result<(), error::Error> {
-    let code = std::fs::read_to_string(input)
-        .map_err(|_| error::Error::msg(format!("cannot read file {input:?}")))?
+fn compile(args: &'static Arguments) -> Result<(), error::Error> {
+    let code = std::fs::read_to_string(&args.input)
+        .map_err(|_| error::Error::msg(format!("cannot read file {:?}", args.input)))?
         .leak();
 
-    let items = dbg!(parse::parse(code)?);
+    let paths = RefCell::new(HashSet::from([args.input.as_path()]));
+    let items = parse::parse(code, &args.input, &paths)?;
     let resolved = resolve::resolve(items)?;
     let init_order = toposort::static_initialization_order(&resolved)?;
 
@@ -52,7 +55,7 @@ fn compile(input: &Path, output: &Path, release: bool) -> Result<(), error::Erro
     let object_file = tempfile::NamedTempFile::with_prefix(".o")
         .map_err(|_| error::Error::msg("cannot create temporary object file"))?;
 
-    let opt_level = if release { "-O3" } else { "-O0" };
+    let opt_level = if args.release { "-O3" } else { "-O0" };
     let llc_status = Command::new("llc")
         .arg(llvm_file.path())
         .arg("-filetype=obj")
@@ -68,7 +71,7 @@ fn compile(input: &Path, output: &Path, release: bool) -> Result<(), error::Erro
     let cc_status = Command::new("cc")
         .arg(object_file.path())
         .arg("-o")
-        .arg(output)
+        .arg(&args.output)
         .status()
         .map_err(|_| error::Error::msg("cannot invoke linker"))?;
     if !cc_status.success() {

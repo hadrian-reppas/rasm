@@ -1,17 +1,21 @@
+use std::path::Path;
+
 use crate::error::{Error, Span};
 
 pub struct Lexer {
-    suffix: &'static str,
-    code: &'static str,
-    line: usize,
-    column: usize,
+    pub suffix: &'static str,
+    pub code: &'static str,
+    pub path: &'static Path,
+    pub line: usize,
+    pub column: usize,
 }
 
 impl Lexer {
-    pub fn new(code: &'static str) -> Self {
+    pub fn new(code: &'static str, path: &'static Path) -> Self {
         Lexer {
             suffix: code,
             code,
+            path,
             line: 1,
             column: 0,
         }
@@ -21,6 +25,7 @@ impl Lexer {
         let span = Span {
             text: &self.suffix[..len],
             code: self.code,
+            path: self.path,
             line: self.line,
             column: self.column,
         };
