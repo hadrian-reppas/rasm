@@ -186,4 +186,8 @@ fn main() {
 	puts("length: ");
 	putd(string[LENGTH]);
 	putc('\n');
+
+	let str = string::new();
+	string::push(str, 'x');
+	let len = string::len(str);
 }

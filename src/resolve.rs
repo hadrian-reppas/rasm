@@ -79,6 +79,8 @@ fn make_statics_and_functions(
         let (name, is_function) = match item {
             ast::Item::Function { name, .. } => (name, true),
             ast::Item::Static { name, .. } => (name, false),
+            ast::Item::Mod(_) => todo!(),
+            ast::Item::Use { .. } => todo!(),
         };
 
         if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
@@ -146,6 +148,8 @@ fn resolve_item(
                 function_dependencies: resolver.function_dependencies.into_iter().collect(),
             }))
         }
+        ast::Item::Mod(_) => todo!(),
+        ast::Item::Use { .. } => todo!(),
     }
 }
 
@@ -321,11 +325,12 @@ impl<'a> Resolver<'a> {
     fn visit_expr(&mut self, expr: &mut ast::Expr) -> Result<(), Error> {
         match expr {
             ast::Expr::String(_) | ast::Expr::Int(_) => Ok(()),
-            ast::Expr::Name(name) => self.visit_name(name),
+            ast::Expr::Path { with_crate, path } => self.visit_name(path.last_mut().unwrap()), // FIXME
             ast::Expr::Block(block) => self.visit_block(block),
             ast::Expr::AddrOf(expr) => {
-                if let ast::PlaceExpr::Name(name) = expr {
-                    if let Variable::Local(id) = self.resolve(name)? {
+                if let ast::PlaceExpr::Path { with_crate, path } = expr {
+                    // FIXME
+                    if let Variable::Local(id) = self.resolve(path.last().unwrap())? {
                         self.ensure_on_stack(id);
                     }
                 }
@@ -409,7 +414,7 @@ impl<'a> Resolver<'a> {
 
     fn visit_place_expr(&mut self, expr: &mut ast::PlaceExpr) -> Result<(), Error> {
         match expr {
-            ast::PlaceExpr::Name(name) => self.visit_name(name),
+            ast::PlaceExpr::Path { with_crate, path } => self.visit_name(path.last_mut().unwrap()), // FIXME
             ast::PlaceExpr::Deref(expr) => self.visit_expr(expr),
             ast::PlaceExpr::Index { target, index } => {
                 self.visit_expr(target)?;
@@ -450,14 +455,17 @@ impl<'a> Resolver<'a> {
                 }
             }
             ast::Expr::Int(int) => Ok(resolved::Expr::Int(int)),
-            ast::Expr::Name(name) => match name.variable_id.unwrap() {
-                Variable::Static(id) => Ok(resolved::Expr::Static(id)),
-                Variable::Function(id) => Ok(resolved::Expr::Function(id)),
-                Variable::Local(id) => match self.convert_local_id(id) {
-                    Local::Stack(id) => Ok(resolved::Expr::Stack(id)),
-                    Local::Transient(id) => Ok(resolved::Expr::Transient(id)),
-                },
-            },
+            ast::Expr::Path { with_crate, path } => {
+                // FIXME
+                match path.last().unwrap().variable_id.unwrap() {
+                    Variable::Static(id) => Ok(resolved::Expr::Static(id)),
+                    Variable::Function(id) => Ok(resolved::Expr::Function(id)),
+                    Variable::Local(id) => match self.convert_local_id(id) {
+                        Local::Stack(id) => Ok(resolved::Expr::Stack(id)),
+                        Local::Transient(id) => Ok(resolved::Expr::Transient(id)),
+                    },
+                }
+            }
             ast::Expr::Block(block) => Ok(resolved::Expr::Block(self.convert_block(block)?)),
             ast::Expr::AddrOf(expr) => Ok(resolved::Expr::AddrOf(self.convert_addr_of_expr(expr)?)),
             ast::Expr::Binary { op, lhs, rhs } => Ok(resolved::Expr::Binary {
@@ -553,17 +561,20 @@ impl<'a> Resolver<'a> {
         expr: ast::PlaceExpr,
     ) -> Result<resolved::AssignTargetExpr, Error> {
         match expr {
-            ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
-                Variable::Static(id) => Ok(resolved::AssignTargetExpr::Static(id)),
-                Variable::Function(_) => Err(Error::new(
-                    name.span,
-                    format!("`{}` is a function", name.name),
-                )),
-                Variable::Local(id) => match self.convert_local_id(id) {
-                    Local::Stack(id) => Ok(resolved::AssignTargetExpr::Stack(id)),
-                    Local::Transient(id) => Ok(resolved::AssignTargetExpr::Transient(id)),
-                },
-            },
+            ast::PlaceExpr::Path { with_crate, path } => {
+                // FIXME
+                match path.last().unwrap().variable_id.unwrap() {
+                    Variable::Static(id) => Ok(resolved::AssignTargetExpr::Static(id)),
+                    Variable::Function(_) => Err(Error::new(
+                        path.last().unwrap().span,
+                        format!("`{}` is a function", path.last().unwrap().name), // FIXME
+                    )),
+                    Variable::Local(id) => match self.convert_local_id(id) {
+                        Local::Stack(id) => Ok(resolved::AssignTargetExpr::Stack(id)),
+                        Local::Transient(id) => Ok(resolved::AssignTargetExpr::Transient(id)),
+                    },
+                }
+            }
 
             ast::PlaceExpr::Deref(expr) => Ok(resolved::AssignTargetExpr::Deref(Box::new(
                 self.convert_expr(*expr)?,
@@ -580,17 +591,20 @@ impl<'a> Resolver<'a> {
         expr: ast::PlaceExpr,
     ) -> Result<resolved::AddrOfExpr, Error> {
         match expr {
-            ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
-                Variable::Static(id) => Ok(resolved::AddrOfExpr::Static(id)),
-                Variable::Function(_) => Err(Error::new(
-                    name.span,
-                    format!("`{}` is a function", name.name),
-                )),
-                Variable::Local(id) => match self.convert_local_id(id) {
-                    Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
-                    Local::Transient(_) => unreachable!(),
-                },
-            },
+            ast::PlaceExpr::Path { with_crate, path } => {
+                // FIXME
+                match path.last().unwrap().variable_id.unwrap() {
+                    Variable::Static(id) => Ok(resolved::AddrOfExpr::Static(id)),
+                    Variable::Function(_) => Err(Error::new(
+                        path.last().unwrap().span,
+                        format!("`{}` is a function", path.last().unwrap().name), // FIXME
+                    )),
+                    Variable::Local(id) => match self.convert_local_id(id) {
+                        Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
+                        Local::Transient(_) => unreachable!(),
+                    },
+                }
+            }
             ast::PlaceExpr::Deref(_) => unreachable!(),
             ast::PlaceExpr::Index { target, index } => Ok(resolved::AddrOfExpr::Index {
                 target: Box::new(self.convert_expr(*target)?),
