@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::error::Error;
+use crate::resolved::Function;
 use crate::{ast, resolved};
 
 pub type StaticId = usize;
@@ -163,6 +164,12 @@ fn resolve_items(
                 statics.extend(mod_statics);
             }
             ast::Item::Use { .. } => {}
+            ast::Item::Intrinsic { name, id } => {
+                functions.insert(
+                    id.unwrap(),
+                    Function::intrinsic(prefix.clone(), name, id.unwrap()),
+                );
+            }
         }
     }
 
@@ -178,7 +185,7 @@ fn resolve_function(
     context: &GlobalContext,
     strings: &mut HashMap<String, StringId>,
 ) -> Result<resolved::Function, Error> {
-    let mut resolver = Resolver::with_params(&params, context, strings)?;
+    let mut resolver = Resolver::with_params(params, context, strings)?;
     resolver.visit_block(&mut block)?;
     let params: Vec<_> = params
         .iter()
@@ -192,6 +199,7 @@ fn resolve_function(
             prefix: prefix.to_vec(),
             name: name.name,
             span: name.span,
+            is_intrinsic: false,
             id,
             params,
             block: resolver.convert_block(block)?,
@@ -244,7 +252,7 @@ fn make_module_tree(items: &mut [ast::Item], counter: &mut Counter) -> Result<Mo
 
     for item in items {
         match item {
-            ast::Item::Function { name, id, .. } => {
+            ast::Item::Function { name, id, .. } | ast::Item::Intrinsic { name, id } => {
                 if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
                     return Err(Error::new(
                         name.span,

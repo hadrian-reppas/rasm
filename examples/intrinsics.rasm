@@ -1,0 +1,5 @@
+use std::intrinsics::putd;
+
+fn main() {
+	putd(42);
+}

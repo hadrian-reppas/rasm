@@ -1,81 +1,57 @@
-pub struct BuiltinFunction {
-    pub name: &'static str,
-    pub params: usize,
-    pub body: &'static str,
-}
+@__stdoutp = external global ptr, align 8
+@__stdinp = external global ptr, align 8
 
-pub const BUILTIN_FUNCTIONS: &[BuiltinFunction] = &[
-    BuiltinFunction {
-        name: "alloc",
-        params: 1,
-        body: ALLOC_BODY,
-    },
-    BuiltinFunction {
-        name: "free",
-        params: 1,
-        body: FREE_BODY,
-    },
-    BuiltinFunction {
-        name: "putc",
-        params: 1,
-        body: PUTC_BODY,
-    },
-    BuiltinFunction {
-        name: "putd",
-        params: 1,
-        body: PUTD_BODY,
-    },
-    BuiltinFunction {
-        name: "puts",
-        params: 1,
-        body: PUTS_BODY,
-    },
-    BuiltinFunction {
-        name: "stdin",
-        params: 0,
-        body: STDIN_BODY,
-    },
-];
+declare i32 @printf(ptr, ...)
+declare i64 @getline(ptr, ptr, ptr)
+declare ptr @malloc(i64)
+declare void @free(ptr)
+declare ptr @setlocale(i32, ptr)
+declare i32 @fflush(ptr)
 
-const ALLOC_BODY: &str = r"{
-  %2 = mul nsw i64 8, %0
+@percent_lc = constant [4 x i8] c"%lc\00", align 1
+@percent_ld = constant [4 x i8] c"%ld\00", align 1
+@percent_s = constant [3 x i8] c"%s\00", align 1
+@empty_str = constant [1 x i8] c"\00", align 1
+
+define i64 @std.intrinsics.alloc(i64 %0) {
+  %2 = mul i64 8, %0
   %3 = call ptr @malloc(i64 %2)
   %4 = ptrtoint ptr %3 to i64
   ret i64 %4
-}";
+}
 
-const FREE_BODY: &str = r"{
+define i64 @std.intrinsics.free(i64 %0) {
   %2 = inttoptr i64 %0 to ptr
   call void @free(ptr %2)
   ret i64 0
-}";
+}
 
-const PUTC_BODY: &str = r"{
+define i64 @std.intrinsics.putc(i64 %0) {
   %2 = call i32 (ptr, ...) @printf(ptr @percent_lc, i64 %0)
   %3 = sext i32 %2 to i64
   %4 = load ptr, ptr @__stdoutp, align 8
   %5 = call i32 @fflush(ptr %4)
   ret i64 %3
-}";
+}
 
-const PUTD_BODY: &str = r"{
+define i64 @std.intrinsics.putd(i64 %0) {
   %2 = call i32 (ptr, ...) @printf(ptr @percent_ld, i64 %0)
   %3 = sext i32 %2 to i64
   %4 = load ptr, ptr @__stdoutp, align 8
   %5 = call i32 @fflush(ptr %4)
   ret i64 %3
-}";
+}
 
-const PUTS_BODY: &str = r"{
+define i64 @std.intrinsics.puts(i64 %0) {
   %2 = inttoptr i64 %0 to ptr
   %3 = call i32 (ptr, ...) @printf(ptr @percent_s, ptr %2)
   %4 = sext i32 %3 to i64
   %5 = load ptr, ptr @__stdoutp, align 8
   %6 = call i32 @fflush(ptr %5)
   ret i64 %4
-}";
+}
 
-const STDIN_BODY: &str = r"{
+define i64 @std.intrinsics.stdin() {
   %1 = alloca ptr, align 8
   %2 = alloca i64, align 8
   store ptr null, ptr %1, align 8
@@ -94,4 +70,4 @@ const STDIN_BODY: &str = r"{
   %9 = load ptr, ptr %1, align 8
   %10 = ptrtoint ptr %9 to i64
   ret i64 %10
-}";
+}

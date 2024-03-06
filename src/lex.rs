@@ -87,7 +87,7 @@ impl Lexer {
         self.consume_whitespace();
 
         if self.suffix.starts_with(is_name_start) {
-            return Ok(self.name_or_keyword());
+            return self.name_or_keyword();
         } else if is_int_start(self.suffix) {
             return self.int_literal();
         } else if self.suffix.starts_with('\'') {
@@ -154,7 +154,7 @@ impl Lexer {
         )
     }
 
-    fn name_or_keyword(&mut self) -> Token {
+    fn name_or_keyword(&mut self) -> Result<Token, Error> {
         let mut len = 1;
         while self.suffix[len..].starts_with(is_name_char) {
             len += 1;
@@ -163,6 +163,16 @@ impl Lexer {
         let mut token = self.make_token(TokenKind::Name, len);
 
         match token.span.text {
+            "intrinsic" => {
+                if self.path.is_std() {
+                    token.kind = TokenKind::Intrinsic;
+                } else {
+                    return Err(Error::new(
+                        token.span,
+                        format!("`intrinsic` keyword not allowed here"),
+                    ));
+                }
+            }
             "let" => token.kind = TokenKind::Let,
             "fn" => token.kind = TokenKind::Fn,
             "use" => token.kind = TokenKind::Use,
@@ -178,7 +188,7 @@ impl Lexer {
             _ => {}
         }
 
-        token
+        Ok(token)
     }
 
     fn int_literal(&mut self) -> Result<Token, Error> {
@@ -288,6 +298,7 @@ pub enum TokenKind {
     Mod,
     Use,
     Crate,
+    Intrinsic,
     Return,
     If,
     Else,
