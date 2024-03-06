@@ -1,0 +1,5 @@
+fn nop() {}
+fn nop1(a) {}
+fn nop2(a, b) {}
+fn nop3(a, b, c) {}
+fn nop4(a, b, c, d) {}

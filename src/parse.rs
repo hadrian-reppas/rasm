@@ -1,75 +1,53 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
-use std::path::Path;
 
 use crate::ast::{
     AssignOp, BinaryOp, Block, Expr, ForInit, Item, Name, PlaceExpr, Stmt, UnaryOp, UseTree,
     UseTreeKind,
 };
 use crate::error::Error;
+use crate::io::{load_source, SourcePath};
 use crate::lex::{Lexer, Token, TokenKind};
 
 struct Parser<'a> {
     peek: Token,
     lexer: Lexer,
-    paths: &'a RefCell<HashSet<&'static Path>>,
+    paths: &'a RefCell<HashSet<SourcePath>>,
 }
 
 pub fn parse(
     code: &'static str,
-    path: &'static Path,
-    paths: &RefCell<HashSet<&'static Path>>,
+    path: SourcePath,
+    paths: &RefCell<HashSet<SourcePath>>,
 ) -> Result<Vec<Item>, Error> {
     let mut parser = Parser::new(code, path, paths)?;
     parser.items()
 }
 
 fn parse_mod(
-    path: &'static Path,
+    path: SourcePath,
     name: &Name,
-    paths: &RefCell<HashSet<&'static Path>>,
+    paths: &RefCell<HashSet<SourcePath>>,
 ) -> Result<Vec<Item>, Error> {
-    let (mut file_path, mut mod_file_path) = (path.to_path_buf(), path.to_path_buf());
-    file_path.pop();
-    file_path.push(&format!("{}.rasm", name.name));
-    mod_file_path.pop();
-    mod_file_path.push(&format!("{}/mod.rasm", name.name));
+    let new_path = path.push(name)?;
 
-    let new_path = if file_path.exists() && mod_file_path.exists() {
-        return Err(Error::new(
-            name.span,
-            format!("both {file_path:?} and {mod_file_path:?} exist"),
-        ));
-    } else if file_path.exists() {
-        let new_path: &'static Path = Box::leak(Box::new(file_path));
-        new_path
-    } else if mod_file_path.exists() {
-        let new_path: &'static Path = Box::leak(Box::new(mod_file_path));
-        new_path
-    } else {
-        return Err(Error::msg(format!(
-            "neither {file_path:?} or {mod_file_path:?} exists"
-        )));
-    };
-
-    if paths.borrow().contains(new_path) {
+    if paths.borrow().contains(&new_path) {
         return Err(Error::new(
             name.span,
             format!("{new_path:?} is already in module tree"),
         ));
     }
     paths.borrow_mut().insert(new_path);
-    let code = std::fs::read_to_string(new_path)
-        .map_err(|_| Error::msg(format!("cannot read file {new_path:?}")))?
-        .leak();
+
+    let code = load_source(new_path)?;
     parse(code, new_path, paths)
 }
 
 impl<'a> Parser<'a> {
     fn new(
         code: &'static str,
-        path: &'static Path,
-        paths: &'a RefCell<HashSet<&'static Path>>,
+        path: SourcePath,
+        paths: &'a RefCell<HashSet<SourcePath>>,
     ) -> Result<Self, Error> {
         let mut lexer = Lexer::new(code, path);
         Ok(Parser {

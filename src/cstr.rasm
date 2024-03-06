@@ -1,0 +1,16 @@
+fn strlen(s) {
+	let ptr = s;
+	for (; load_byte(ptr);) { ptr += 1; }
+	ptr - s
+}
+
+fn strcpy(dst, src) {
+	let byte = 1;
+	for (; byte;) {
+		byte = load_byte(src);
+		store_byte(dst, byte);
+		src += 1;
+		dst += 1;
+	}
+}
+

@@ -1,12 +1,12 @@
-use std::path::Path;
-
 use termion::{color, style};
+
+use crate::io::SourcePath;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub text: &'static str,
     pub code: &'static str,
-    pub path: &'static Path,
+    pub path: SourcePath,
     pub line: usize,
     pub column: usize,
 }
@@ -29,7 +29,7 @@ impl Error {
         let span = Span {
             text: "",
             code: "",
-            path: Path::new("."),
+            path: SourcePath::Std(&[]),
             line: 0,
             column: 0,
         };

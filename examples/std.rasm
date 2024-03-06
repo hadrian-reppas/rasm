@@ -1,0 +1,6 @@
+use std::{string, mem};
+
+fn main() {
+	let string = string::from("Hello, world!\n");
+	mem::load_byte(string)
+}

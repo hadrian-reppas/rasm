@@ -9,6 +9,7 @@ mod ast;
 mod builtins;
 mod codegen;
 mod error;
+mod io;
 mod lex;
 mod parse;
 mod resolve;
@@ -42,14 +43,18 @@ fn main() -> ExitCode {
 }
 
 fn compile(args: &'static Arguments) -> Result<(), error::Error> {
-    let code = std::fs::read_to_string(&args.input)
-        .map_err(|_| error::Error::msg(format!("cannot read file {:?}", args.input)))?
-        .leak();
+    let path = io::SourcePath::Path(&args.input);
+    let code = io::load_source(path)?;
 
-    let paths = RefCell::new(HashSet::from([args.input.as_path()]));
-    let items = parse::parse(code, &args.input, &paths)?;
+    let paths = RefCell::new(HashSet::from([path]));
+    let items = parse::parse(code, path, &paths)?;
+
+    let std_path = io::SourcePath::Std(&["mod.rasm"]);
+    let std_code = io::load_source(std_path)?;
+    let std_items = parse::parse(std_code, std_path, &paths)?;
+
     let resolved = resolve::resolve(HashMap::from([
-        ("std".to_string(), Vec::new()),
+        ("std".to_string(), std_items),
         ("crate".to_string(), items),
     ]))?;
     let init_order = toposort::static_initialization_order(&resolved)?;
