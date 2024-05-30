@@ -27,7 +27,7 @@ pub enum Expr {
     Stack(StackId),
     Transient(TransientId),
     Block(Block),
-    AddrOf(PlaceExpr),
+    AddrOf(AddrOfExpr),
     Binary {
         op: BinaryOp,
         lhs: Box<Expr>,
@@ -38,12 +38,12 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Assign {
-        target: PlaceExpr,
+        target: AssignTargetExpr,
         rhs: Box<Expr>,
     },
     AssignOp {
         op: AssignOp,
-        target: PlaceExpr,
+        target: AssignTargetExpr,
         rhs: Box<Expr>,
     },
     Index {
@@ -60,10 +60,24 @@ pub enum Expr {
         else_ifs: Vec<ElseIf>,
         else_block: Option<Block>,
     },
+    For {
+        init: Option<ForInit>,
+        test: Option<Box<Expr>>,
+        update: Option<Box<Expr>>,
+        block: Block,
+    },
+    Return(Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone)]
-pub enum PlaceExpr {
+pub enum AddrOfExpr {
+    Global(GlobalId),
+    Stack(StackId),
+    Index { target: Box<Expr>, index: Box<Expr> },
+}
+
+#[derive(Debug, Clone)]
+pub enum AssignTargetExpr {
     Global(GlobalId),
     Stack(StackId),
     Transient(TransientId),
@@ -85,22 +99,12 @@ pub struct Block {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Let {
-        id: Local,
-        expr: Expr,
-    },
-    Return(Option<Expr>),
-    For {
-        init: Option<ForInit>,
-        test: Option<Expr>,
-        update: Option<Expr>,
-        block: Block,
-    },
+    Let { id: Local, expr: Expr },
     Expr(Expr),
 }
 
 #[derive(Debug, Clone)]
 pub enum ForInit {
-    Let { id: Local, expr: Expr },
-    Expr(Expr),
+    Let { id: Local, expr: Box<Expr> },
+    Expr(Box<Expr>),
 }

@@ -232,39 +232,6 @@ impl<'a> Resolver<'a> {
                     self.visit_expr(expr)?;
                     *local_id = Some(self.define(name));
                 }
-                ast::Stmt::Return(expr) => {
-                    if let Some(expr) = expr {
-                        self.visit_expr(expr)?
-                    }
-                }
-                ast::Stmt::For {
-                    init,
-                    test,
-                    update,
-                    block,
-                } => {
-                    self.enter_block();
-                    match init {
-                        Some(ast::ForInit::Let {
-                            name,
-                            expr,
-                            local_id,
-                        }) => {
-                            self.visit_expr(expr)?;
-                            *local_id = Some(self.define(name));
-                        }
-                        Some(ast::ForInit::Expr(expr)) => self.visit_expr(expr)?,
-                        None => {}
-                    }
-                    if let Some(test) = test {
-                        self.visit_expr(test)?
-                    }
-                    if let Some(update) = update {
-                        self.visit_expr(update)?;
-                    }
-                    self.visit_block(block)?;
-                    self.exit_block();
-                }
                 ast::Stmt::Expr(expr) => self.visit_expr(expr)?,
             }
         }
@@ -325,6 +292,42 @@ impl<'a> Resolver<'a> {
                 }
                 Ok(())
             }
+            ast::Expr::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.visit_expr(expr)
+                } else {
+                    Ok(())
+                }
+            }
+            ast::Expr::For {
+                init,
+                test,
+                update,
+                block,
+            } => {
+                self.enter_block();
+                match init {
+                    Some(ast::ForInit::Let {
+                        name,
+                        expr,
+                        local_id,
+                    }) => {
+                        self.visit_expr(expr)?;
+                        *local_id = Some(self.define(name));
+                    }
+                    Some(ast::ForInit::Expr(expr)) => self.visit_expr(expr)?,
+                    None => {}
+                }
+                if let Some(test) = test {
+                    self.visit_expr(test)?
+                }
+                if let Some(update) = update {
+                    self.visit_expr(update)?;
+                }
+                self.visit_block(block)?;
+                self.exit_block();
+                Ok(())
+            }
         }
     }
 
@@ -355,49 +358,6 @@ impl<'a> Resolver<'a> {
                         expr: self.convert_expr(expr)?,
                     }
                 }
-                ast::Stmt::Return(expr) => {
-                    if let Some(expr) = expr {
-                        resolved::Stmt::Return(Some(self.convert_expr(expr)?))
-                    } else {
-                        resolved::Stmt::Return(None)
-                    }
-                }
-                ast::Stmt::For {
-                    init,
-                    test,
-                    update,
-                    block,
-                } => {
-                    let init = match init {
-                        Some(ast::ForInit::Let { expr, local_id, .. }) => {
-                            Some(resolved::ForInit::Let {
-                                id: self.convert_local_id(local_id.unwrap()),
-                                expr: self.convert_expr(expr)?,
-                            })
-                        }
-                        Some(ast::ForInit::Expr(expr)) => {
-                            Some(resolved::ForInit::Expr(self.convert_expr(expr)?))
-                        }
-                        None => None,
-                    };
-                    let test = if let Some(test) = test {
-                        Some(self.convert_expr(test)?)
-                    } else {
-                        None
-                    };
-                    let update = if let Some(update) = update {
-                        Some(self.convert_expr(update)?)
-                    } else {
-                        None
-                    };
-                    let block = self.convert_block(block)?;
-                    resolved::Stmt::For {
-                        init,
-                        test,
-                        update,
-                        block,
-                    }
-                }
                 ast::Stmt::Expr(expr) => resolved::Stmt::Expr(self.convert_expr(expr)?),
             };
             stmts.push(converted_stmt);
@@ -423,7 +383,7 @@ impl<'a> Resolver<'a> {
                 },
             },
             ast::Expr::Block(block) => Ok(resolved::Expr::Block(self.convert_block(block)?)),
-            ast::Expr::AddrOf(expr) => Ok(resolved::Expr::AddrOf(self.convert_place_expr(expr)?)),
+            ast::Expr::AddrOf(expr) => Ok(resolved::Expr::AddrOf(self.convert_addr_of_expr(expr)?)),
             ast::Expr::Binary { op, lhs, rhs } => Ok(resolved::Expr::Binary {
                 op,
                 lhs: Box::new(self.convert_expr(*lhs)?),
@@ -434,12 +394,12 @@ impl<'a> Resolver<'a> {
                 expr: Box::new(self.convert_expr(*expr)?),
             }),
             ast::Expr::Assign { target, rhs } => Ok(resolved::Expr::Assign {
-                target: self.convert_place_expr(target)?,
+                target: self.convert_assign_target_expr(target)?,
                 rhs: Box::new(self.convert_expr(*rhs)?),
             }),
             ast::Expr::AssignOp { op, target, rhs } => Ok(resolved::Expr::AssignOp {
                 op,
-                target: self.convert_place_expr(target)?,
+                target: self.convert_assign_target_expr(target)?,
                 rhs: Box::new(self.convert_expr(*rhs)?),
             }),
             ast::Expr::Index { target, index } => Ok(resolved::Expr::Index {
@@ -471,6 +431,51 @@ impl<'a> Resolver<'a> {
                     None
                 },
             }),
+            ast::Expr::Return(expr) => {
+                if let Some(expr) = expr {
+                    Ok(resolved::Expr::Return(Some(Box::new(
+                        self.convert_expr(*expr)?,
+                    ))))
+                } else {
+                    Ok(resolved::Expr::Return(None))
+                }
+            }
+            ast::Expr::For {
+                init,
+                test,
+                update,
+                block,
+            } => {
+                let init = match init {
+                    Some(ast::ForInit::Let { expr, local_id, .. }) => {
+                        Some(resolved::ForInit::Let {
+                            id: self.convert_local_id(local_id.unwrap()),
+                            expr: Box::new(self.convert_expr(*expr)?),
+                        })
+                    }
+                    Some(ast::ForInit::Expr(expr)) => {
+                        Some(resolved::ForInit::Expr(Box::new(self.convert_expr(*expr)?)))
+                    }
+                    None => None,
+                };
+                let test = if let Some(test) = test {
+                    Some(Box::new(self.convert_expr(*test)?))
+                } else {
+                    None
+                };
+                let update = if let Some(update) = update {
+                    Some(Box::new(self.convert_expr(*update)?))
+                } else {
+                    None
+                };
+                let block = self.convert_block(block)?;
+                Ok(resolved::Expr::For {
+                    init,
+                    test,
+                    update,
+                    block,
+                })
+            }
         }
     }
 
@@ -481,24 +486,51 @@ impl<'a> Resolver<'a> {
         })
     }
 
-    fn convert_place_expr(&mut self, expr: ast::PlaceExpr) -> Result<resolved::PlaceExpr, Error> {
+    fn convert_assign_target_expr(
+        &mut self,
+        expr: ast::PlaceExpr,
+    ) -> Result<resolved::AssignTargetExpr, Error> {
         match expr {
             ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
-                Variable::Global(id) => Ok(resolved::PlaceExpr::Global(id)),
+                Variable::Global(id) => Ok(resolved::AssignTargetExpr::Global(id)),
                 Variable::Function(_) => Err(Error {
                     msg: format!("`{}` is a function", name.name),
                     span: name.span,
                 }),
                 Variable::Local(id) => match self.convert_local_id(id) {
-                    Local::Stack(id) => Ok(resolved::PlaceExpr::Stack(id)),
-                    Local::Transient(id) => Ok(resolved::PlaceExpr::Transient(id)),
+                    Local::Stack(id) => Ok(resolved::AssignTargetExpr::Stack(id)),
+                    Local::Transient(id) => Ok(resolved::AssignTargetExpr::Transient(id)),
                 },
             },
 
-            ast::PlaceExpr::Deref(expr) => Ok(resolved::PlaceExpr::Deref(Box::new(
+            ast::PlaceExpr::Deref(expr) => Ok(resolved::AssignTargetExpr::Deref(Box::new(
                 self.convert_expr(*expr)?,
             ))),
-            ast::PlaceExpr::Index { target, index } => Ok(resolved::PlaceExpr::Index {
+            ast::PlaceExpr::Index { target, index } => Ok(resolved::AssignTargetExpr::Index {
+                target: Box::new(self.convert_expr(*target)?),
+                index: Box::new(self.convert_expr(*index)?),
+            }),
+        }
+    }
+
+    fn convert_addr_of_expr(
+        &mut self,
+        expr: ast::PlaceExpr,
+    ) -> Result<resolved::AddrOfExpr, Error> {
+        match expr {
+            ast::PlaceExpr::Name(name) => match name.variable_id.unwrap() {
+                Variable::Global(id) => Ok(resolved::AddrOfExpr::Global(id)),
+                Variable::Function(_) => Err(Error {
+                    msg: format!("`{}` is a function", name.name),
+                    span: name.span,
+                }),
+                Variable::Local(id) => match self.convert_local_id(id) {
+                    Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
+                    Local::Transient(_) => unreachable!(),
+                },
+            },
+            ast::PlaceExpr::Deref(_) => unreachable!(),
+            ast::PlaceExpr::Index { target, index } => Ok(resolved::AddrOfExpr::Index {
                 target: Box::new(self.convert_expr(*target)?),
                 index: Box::new(self.convert_expr(*index)?),
             }),

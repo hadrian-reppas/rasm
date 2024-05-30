@@ -81,7 +81,7 @@ impl Parser {
                     self.expect(TokenKind::RightParen)?;
                     params
                 };
-                let block = self.block()?;
+                let block = self.block(true)?;
                 Ok(Item::Function {
                     name,
                     params,
@@ -92,7 +92,7 @@ impl Parser {
                 self.expect(TokenKind::Let)?;
                 let name = self.name()?;
                 self.expect(TokenKind::Assign)?;
-                let expr = self.expr(BindingPower::Start)?;
+                let expr = self.expr(BindingPower::Start, false)?;
                 self.expect(TokenKind::Semi)?;
                 Ok(Item::Global { name, expr })
             }
@@ -103,7 +103,7 @@ impl Parser {
         }
     }
 
-    fn block(&mut self) -> Result<Block, Error> {
+    fn block(&mut self, allow_return: bool) -> Result<Block, Error> {
         self.expect(TokenKind::LeftBrace)?;
         let mut stmts = Vec::new();
 
@@ -113,7 +113,7 @@ impl Parser {
                     self.expect(TokenKind::Let)?;
                     let name = self.name()?;
                     self.expect(TokenKind::Assign)?;
-                    let expr = self.expr(BindingPower::Start)?;
+                    let expr = self.expr(BindingPower::Start, allow_return)?;
                     self.expect(TokenKind::Semi)?;
                     stmts.push(Stmt::Let {
                         name,
@@ -121,73 +121,11 @@ impl Parser {
                         local_id: None,
                     });
                 }
-                TokenKind::Return => {
-                    self.expect(TokenKind::Return)?;
-                    let expr = if self.peek().kind == TokenKind::Semi {
-                        self.expect(TokenKind::Semi)?;
-                        None
-                    } else {
-                        let expr = self.expr(BindingPower::Start)?;
-                        self.expect(TokenKind::Semi)?;
-                        Some(expr)
-                    };
-                    stmts.push(Stmt::Return(expr));
-                }
-                TokenKind::For => {
-                    self.expect(TokenKind::For)?;
-                    self.expect(TokenKind::LeftParen)?;
-                    let init = match self.peek().kind {
-                        TokenKind::Semi => {
-                            self.expect(TokenKind::Semi)?;
-                            None
-                        }
-                        TokenKind::Let => {
-                            self.expect(TokenKind::Let)?;
-                            let name = self.name()?;
-                            self.expect(TokenKind::Assign)?;
-                            let expr = self.expr(BindingPower::Start)?;
-                            self.expect(TokenKind::Semi)?;
-                            Some(ForInit::Let {
-                                name,
-                                expr,
-                                local_id: None,
-                            })
-                        }
-                        _ => {
-                            let expr = self.expr(BindingPower::Start)?;
-                            self.expect(TokenKind::Semi)?;
-                            Some(ForInit::Expr(expr))
-                        }
-                    };
-                    let test = if self.peek().kind == TokenKind::Semi {
-                        self.expect(TokenKind::Semi)?;
-                        None
-                    } else {
-                        let test = self.expr(BindingPower::Start)?;
-                        self.expect(TokenKind::Semi)?;
-                        Some(test)
-                    };
-                    let update = if self.peek().kind == TokenKind::RightParen {
-                        self.expect(TokenKind::RightParen)?;
-                        None
-                    } else {
-                        let test = self.expr(BindingPower::Start)?;
-                        self.expect(TokenKind::RightParen)?;
-                        Some(test)
-                    };
-                    let block = self.block()?;
-                    stmts.push(Stmt::For {
-                        init,
-                        test,
-                        update,
-                        block,
-                    });
-                }
                 TokenKind::Semi => {
                     self.expect(TokenKind::Semi)?;
                 }
                 _ => {
-                    let expr = self.expr(BindingPower::Start)?;
+                    let expr = self.expr(BindingPower::Start, allow_return)?;
                     match self.peek().kind {
                         TokenKind::Semi => {
                             self.expect(TokenKind::Semi)?;
@@ -219,11 +157,11 @@ impl Parser {
         Ok(Block { stmts, expr: None })
     }
 
-    fn expr(&mut self, bp: BindingPower) -> Result<Expr, Error> {
+    fn expr(&mut self, bp: BindingPower, allow_return: bool) -> Result<Expr, Error> {
         macro_rules! uop {
             ($tok:ident, $op:ident) => {{
                 self.expect(TokenKind::$tok)?;
-                let expr = self.expr(BindingPower::Prefix)?;
+                let expr = self.expr(BindingPower::Prefix, allow_return)?;
                 Expr::Unary {
                     op: UnaryOp::$op,
                     expr: Box::new(expr),
@@ -252,24 +190,24 @@ impl Parser {
                 self.expect(TokenKind::String)?.span.text,
             )),
             TokenKind::Name => Expr::Name(self.name()?),
-            TokenKind::LeftBrace => Expr::Block(self.block()?),
+            TokenKind::LeftBrace => Expr::Block(self.block(allow_return)?),
             TokenKind::LeftParen => {
                 self.expect(TokenKind::LeftParen)?;
-                let expr = self.expr(BindingPower::Start)?;
+                let expr = self.expr(BindingPower::Start, allow_return)?;
                 self.expect(TokenKind::RightParen)?;
                 expr
             }
             TokenKind::If => {
-                let (test, if_block) = self.if_test_and_block()?;
+                let (test, if_block) = self.if_test_and_block(allow_return)?;
                 let mut else_ifs = Vec::new();
                 let mut else_block = None;
                 while self.peek().kind == TokenKind::Else {
                     self.expect(TokenKind::Else)?;
                     if self.peek().kind == TokenKind::If {
-                        let (test, block) = self.if_test_and_block()?;
+                        let (test, block) = self.if_test_and_block(allow_return)?;
                         else_ifs.push(ElseIf { test, block });
                     } else {
-                        else_block = Some(self.block()?);
+                        else_block = Some(self.block(allow_return)?);
                         break;
                     }
                 }
@@ -280,15 +218,87 @@ impl Parser {
                     else_block,
                 }
             }
+            TokenKind::Return => {
+                let token = self.expect(TokenKind::Return)?;
+                if !allow_return {
+                    return Err(Error {
+                        msg: "`return` not allowed in global initializers".to_string(),
+                        span: token.span,
+                    });
+                }
+                let expr = if self.peek().kind.is_expr_start() {
+                    None
+                } else {
+                    Some(Box::new(self.expr(BindingPower::Start, allow_return)?))
+                };
+                Expr::Return(expr)
+            }
+            TokenKind::For => {
+                self.expect(TokenKind::For)?;
+                self.expect(TokenKind::LeftParen)?;
+                let init = match self.peek().kind {
+                    TokenKind::Semi => {
+                        self.expect(TokenKind::Semi)?;
+                        None
+                    }
+                    TokenKind::Let => {
+                        self.expect(TokenKind::Let)?;
+                        let name = self.name()?;
+                        self.expect(TokenKind::Assign)?;
+                        let expr = self.expr(BindingPower::Start, allow_return)?;
+                        self.expect(TokenKind::Semi)?;
+                        Some(ForInit::Let {
+                            name,
+                            expr: Box::new(expr),
+                            local_id: None,
+                        })
+                    }
+                    _ => {
+                        let expr = self.expr(BindingPower::Start, allow_return)?;
+                        self.expect(TokenKind::Semi)?;
+                        Some(ForInit::Expr(Box::new(expr)))
+                    }
+                };
+                let test = if self.peek().kind == TokenKind::Semi {
+                    self.expect(TokenKind::Semi)?;
+                    None
+                } else {
+                    let test = self.expr(BindingPower::Start, allow_return)?;
+                    self.expect(TokenKind::Semi)?;
+                    Some(Box::new(test))
+                };
+                let update = if self.peek().kind == TokenKind::RightParen {
+                    self.expect(TokenKind::RightParen)?;
+                    None
+                } else {
+                    let test = self.expr(BindingPower::Start, allow_return)?;
+                    self.expect(TokenKind::RightParen)?;
+                    Some(Box::new(test))
+                };
+                let block = self.block(allow_return)?;
+                Expr::For {
+                    init,
+                    test,
+                    update,
+                    block,
+                }
+            }
             TokenKind::Dash => uop!(Dash, Negate),
             TokenKind::Tilde => uop!(Tilde, BitNot),
             TokenKind::Bang => uop!(Bang, LogicalNot),
             TokenKind::Star => uop!(Star, Deref),
             TokenKind::And => {
                 let and = self.expect(TokenKind::And)?;
-                let expr = self.expr(BindingPower::Prefix)?;
+                let expr = self.expr(BindingPower::Prefix, allow_return)?;
                 if let Ok(place) = expr.try_into() {
-                    Expr::AddrOf(place)
+                    if matches!(place, PlaceExpr::Deref(_)) {
+                        return Err(Error {
+                            msg: "cannot take address of deref expression".to_string(),
+                            span: and.span,
+                        });
+                    } else {
+                        Expr::AddrOf(place)
+                    }
                 } else {
                     return Err(Error {
                         msg: "target is not an lvalue".to_string(),
@@ -308,7 +318,7 @@ impl Parser {
             lhs = match info {
                 OpInfo::Binary(op, new_bp) => {
                     self.next()?;
-                    let rhs = self.expr(new_bp)?;
+                    let rhs = self.expr(new_bp, allow_return)?;
                     Expr::Binary {
                         op,
                         lhs: Box::new(lhs),
@@ -317,7 +327,7 @@ impl Parser {
                 }
                 OpInfo::AssignOp(op) => {
                     let assign = self.next()?;
-                    let rhs = self.expr(BindingPower::Assign)?;
+                    let rhs = self.expr(BindingPower::Assign, allow_return)?;
                     let Ok(target) = lhs.try_into() else {
                         return Err(Error {
                             msg: "target is not an lvalue".to_string(),
@@ -332,7 +342,7 @@ impl Parser {
                 }
                 OpInfo::Assign => {
                     let assign = self.expect(TokenKind::Assign)?;
-                    let rhs = self.expr(BindingPower::Assign)?;
+                    let rhs = self.expr(BindingPower::Assign, allow_return)?;
                     let Ok(target) = lhs.try_into() else {
                         return Err(Error {
                             msg: "target is not an lvalue".to_string(),
@@ -349,10 +359,10 @@ impl Parser {
                     let args = if self.peek().kind == TokenKind::RightParen {
                         Vec::new()
                     } else {
-                        let mut args = vec![self.expr(BindingPower::Start)?];
+                        let mut args = vec![self.expr(BindingPower::Start, allow_return)?];
                         while self.peek().kind != TokenKind::RightParen {
                             self.expect(TokenKind::Comma)?;
-                            args.push(self.expr(BindingPower::Start)?);
+                            args.push(self.expr(BindingPower::Start, allow_return)?);
                         }
                         args
                     };
@@ -364,7 +374,7 @@ impl Parser {
                 }
                 OpInfo::Index => {
                     self.expect(TokenKind::LeftBrack)?;
-                    let index = self.expr(BindingPower::Start)?;
+                    let index = self.expr(BindingPower::Start, allow_return)?;
                     self.expect(TokenKind::RightBrack)?;
                     Expr::Index {
                         target: Box::new(lhs),
@@ -442,12 +452,12 @@ impl Parser {
         }
     }
 
-    fn if_test_and_block(&mut self) -> Result<(Expr, Block), Error> {
+    fn if_test_and_block(&mut self, allow_return: bool) -> Result<(Expr, Block), Error> {
         self.expect(TokenKind::If)?;
         self.expect(TokenKind::LeftParen)?;
-        let test = self.expr(BindingPower::Start)?;
+        let test = self.expr(BindingPower::Start, allow_return)?;
         self.expect(TokenKind::RightParen)?;
-        let then = self.block()?;
+        let then = self.block(allow_return)?;
         Ok((test, then))
     }
 }

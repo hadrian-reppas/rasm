@@ -60,6 +60,13 @@ pub enum Expr {
         else_ifs: Vec<ElseIf>,
         else_block: Option<Block>,
     },
+    For {
+        init: Option<ForInit>,
+        test: Option<Box<Expr>>,
+        update: Option<Box<Expr>>,
+        block: Block,
+    },
+    Return(Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone)]
@@ -155,13 +162,6 @@ pub enum Stmt {
         expr: Expr,
         local_id: Option<LocalId>,
     },
-    Return(Option<Expr>),
-    For {
-        init: Option<ForInit>,
-        test: Option<Expr>,
-        update: Option<Expr>,
-        block: Block,
-    },
     Expr(Expr),
 }
 
@@ -169,8 +169,8 @@ pub enum Stmt {
 pub enum ForInit {
     Let {
         name: Name,
-        expr: Expr,
+        expr: Box<Expr>,
         local_id: Option<LocalId>,
     },
-    Expr(Expr),
+    Expr(Box<Expr>),
 }
