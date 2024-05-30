@@ -1,5 +1,5 @@
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
-use crate::resolve::{FunctionId, GlobalId, Local, StackId, TransientId};
+use crate::resolve::{FunctionId, GlobalId, Local, StackId, StringId, TransientId};
 
 #[derive(Debug, Clone)]
 pub enum Item {
@@ -10,6 +10,8 @@ pub enum Item {
         block: Block,
         transient_locals: u32,
         stack_locals: u32,
+        global_dependencies: Vec<GlobalId>,
+        function_dependencies: Vec<FunctionId>,
     },
     Global {
         name: String,
@@ -17,12 +19,14 @@ pub enum Item {
         expr: Expr,
         transient_locals: u32,
         stack_locals: u32,
+        global_dependencies: Vec<GlobalId>,
+        function_dependencies: Vec<FunctionId>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    String(String),
+    String(StringId),
     Int(i64),
     Global(GlobalId),
     Function(FunctionId),

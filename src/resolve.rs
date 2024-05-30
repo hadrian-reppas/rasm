@@ -7,6 +7,7 @@ pub type GlobalId = u32;
 pub type FunctionId = u32;
 pub type StackId = u32;
 pub type TransientId = u32;
+pub type StringId = u32;
 
 pub type LocalId = u32;
 
@@ -60,6 +61,7 @@ pub fn resolve(
     item: ast::Item,
     globals: &HashMap<String, GlobalId>,
     functions: &HashMap<String, FunctionId>,
+    strings: &mut HashMap<String, StringId>,
 ) -> Result<resolved::Item, Error> {
     match item {
         ast::Item::Function {
@@ -67,7 +69,7 @@ pub fn resolve(
             params,
             mut block,
         } => {
-            let mut resolver = Resolver::with_params(globals, functions, &params)?;
+            let mut resolver = Resolver::with_params(&params, globals, functions, strings)?;
             resolver.visit_block(&mut block)?;
             let params = params
                 .iter()
@@ -80,10 +82,12 @@ pub fn resolve(
                 block: resolver.convert_block(block)?,
                 transient_locals: resolver.transient_map.len() as u32,
                 stack_locals: resolver.max_stack_locals,
+                global_dependencies: resolver.global_dependencies.into_iter().collect(),
+                function_dependencies: resolver.function_dependencies.into_iter().collect(),
             })
         }
         ast::Item::Global { name, mut expr } => {
-            let mut resolver = Resolver::new(globals, functions);
+            let mut resolver = Resolver::new(globals, functions, strings);
             resolver.visit_expr(&mut expr)?;
             Ok(resolved::Item::Global {
                 name: name.name.to_string(),
@@ -91,6 +95,8 @@ pub fn resolve(
                 expr: resolver.convert_expr(expr)?,
                 transient_locals: resolver.transient_map.len() as u32,
                 stack_locals: resolver.max_stack_locals,
+                global_dependencies: resolver.global_dependencies.into_iter().collect(),
+                function_dependencies: resolver.function_dependencies.into_iter().collect(),
             })
         }
     }
@@ -99,6 +105,7 @@ pub fn resolve(
 struct Resolver<'a> {
     globals: &'a HashMap<String, GlobalId>,
     functions: &'a HashMap<String, FunctionId>,
+    strings: &'a mut HashMap<String, StringId>,
     variable_stack: Vec<HashMap<String, LocalId>>,
     local_map: HashMap<LocalId, LocalWip>,
     local_counter: u32,
@@ -113,10 +120,12 @@ impl<'a> Resolver<'a> {
     fn new(
         globals: &'a HashMap<String, GlobalId>,
         functions: &'a HashMap<String, FunctionId>,
+        strings: &'a mut HashMap<String, StringId>,
     ) -> Self {
         Resolver {
             globals,
             functions,
+            strings,
             variable_stack: Vec::new(),
             local_map: HashMap::new(),
             local_counter: 0,
@@ -129,9 +138,10 @@ impl<'a> Resolver<'a> {
     }
 
     fn with_params(
+        params: &[ast::Name],
         globals: &'a HashMap<String, GlobalId>,
         functions: &'a HashMap<String, FunctionId>,
-        params: &[ast::Name],
+        strings: &'a mut HashMap<String, StringId>,
     ) -> Result<Self, Error> {
         let mut param_map = HashMap::new();
         for (local_id, param) in params.into_iter().enumerate() {
@@ -147,6 +157,7 @@ impl<'a> Resolver<'a> {
         Ok(Resolver {
             globals,
             functions,
+            strings,
             variable_stack: vec![param_map],
             local_map: (0..params.len())
                 .map(|id| (id as LocalId, LocalWip::Transient))
@@ -382,7 +393,15 @@ impl<'a> Resolver<'a> {
 
     fn convert_expr(&mut self, expr: ast::Expr) -> Result<resolved::Expr, Error> {
         match expr {
-            ast::Expr::String(string) => Ok(resolved::Expr::String(string)),
+            ast::Expr::String(string) => {
+                if let Some(id) = self.strings.get(&string) {
+                    Ok(resolved::Expr::String(*id))
+                } else {
+                    let id = self.strings.len() as StringId;
+                    self.strings.insert(string, id);
+                    Ok(resolved::Expr::String(id))
+                }
+            }
             ast::Expr::Int(int) => Ok(resolved::Expr::Int(int)),
             ast::Expr::Name(name) => match name.variable_id.unwrap() {
                 Variable::Global(id) => Ok(resolved::Expr::Global(id)),
@@ -536,10 +555,10 @@ impl<'a> Resolver<'a> {
                 }),
                 Variable::Local(id) => match self.convert_local_id(id) {
                     Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
-                    Local::Transient(id) => unreachable!(),
+                    Local::Transient(_) => unreachable!(),
                 },
             },
-            ast::PlaceExpr::Deref(expr) => unreachable!(),
+            ast::PlaceExpr::Deref(_) => unreachable!(),
             ast::PlaceExpr::Index { target, index } => Ok(resolved::AddrOfExpr::Index {
                 target: Box::new(self.convert_expr(*target)?),
                 index: Box::new(self.convert_expr(*index)?),
