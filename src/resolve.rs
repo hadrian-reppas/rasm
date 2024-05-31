@@ -30,7 +30,37 @@ pub enum Local {
     Transient(TransientId),
 }
 
-pub fn make_globals_and_functions(
+#[derive(Debug, Clone)]
+pub struct Resolved {
+    functions: Vec<resolved::Function>,
+    globals: Vec<resolved::Global>,
+    strings: Vec<String>,
+}
+
+pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
+    let (global_names, function_names) = make_globals_and_functions(&items)?;
+    let mut strings = HashMap::new();
+    let mut globals = Vec::new();
+    let mut functions = Vec::new();
+
+    for item in items {
+        match resolve_item(item, &global_names, &function_names, &mut strings)? {
+            resolved::Item::Global(global) => globals.push(global),
+            resolved::Item::Function(function) => functions.push(function),
+        }
+    }
+
+    let mut strings: Vec<_> = strings.into_iter().collect();
+    strings.sort_by_key(|(_, id)| *id);
+
+    Ok(Resolved {
+        functions,
+        globals,
+        strings: strings.into_iter().map(|(s, _)| s).collect(),
+    })
+}
+
+fn make_globals_and_functions(
     items: &[ast::Item],
 ) -> Result<(HashMap<String, GlobalId>, HashMap<String, FunctionId>), Error> {
     let mut globals = HashMap::new();
@@ -57,7 +87,7 @@ pub fn make_globals_and_functions(
     Ok((globals, functions))
 }
 
-pub fn resolve(
+fn resolve_item(
     item: ast::Item,
     globals: &HashMap<String, GlobalId>,
     functions: &HashMap<String, FunctionId>,
@@ -75,7 +105,7 @@ pub fn resolve(
                 .iter()
                 .map(|param| resolver.convert_local_id(resolver.variable_stack[0][&param.name]))
                 .collect();
-            Ok(resolved::Item::Function {
+            Ok(resolved::Item::Function(resolved::Function {
                 name: name.name.to_string(),
                 id: functions[&name.name],
                 params,
@@ -84,12 +114,12 @@ pub fn resolve(
                 stack_locals: resolver.max_stack_locals,
                 global_dependencies: resolver.global_dependencies.into_iter().collect(),
                 function_dependencies: resolver.function_dependencies.into_iter().collect(),
-            })
+            }))
         }
         ast::Item::Global { name, mut expr } => {
             let mut resolver = Resolver::new(globals, functions, strings);
             resolver.visit_expr(&mut expr)?;
-            Ok(resolved::Item::Global {
+            Ok(resolved::Item::Global(resolved::Global {
                 name: name.name.to_string(),
                 id: globals[&name.name],
                 expr: resolver.convert_expr(expr)?,
@@ -97,7 +127,7 @@ pub fn resolve(
                 stack_locals: resolver.max_stack_locals,
                 global_dependencies: resolver.global_dependencies.into_iter().collect(),
                 function_dependencies: resolver.function_dependencies.into_iter().collect(),
-            })
+            }))
         }
     }
 }
