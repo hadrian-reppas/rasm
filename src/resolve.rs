@@ -324,7 +324,7 @@ impl<'a> Resolver<'a> {
             ast::Expr::Call { func, args } => {
                 self.visit_expr(func)?;
                 for arg in args {
-                    self.visit_expr(arg)?
+                    self.visit_expr(arg)?;
                 }
                 Ok(())
             }
@@ -372,7 +372,7 @@ impl<'a> Resolver<'a> {
                     None => {}
                 }
                 if let Some(test) = test {
-                    self.visit_expr(test)?
+                    self.visit_expr(test)?;
                 }
                 if let Some(update) = update {
                     self.visit_expr(update)?;
