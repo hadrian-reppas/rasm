@@ -4,6 +4,7 @@ mod lex;
 mod parse;
 mod resolve;
 mod resolved;
+mod toposort;
 
 fn main() {
     let file_path = std::env::args().nth(1).unwrap();
@@ -11,11 +12,9 @@ fn main() {
 
     let items = parse::parse(code).unwrap();
 
-    let (globals, functions) = resolve::make_globals_and_functions(&items).unwrap();
-    let resolved: Vec<_> = items
-        .into_iter()
-        .map(|item| resolve::resolve(item, &globals, &functions))
-        .collect::<Result<_, _>>()
-        .unwrap();
+    let resolved = resolve::resolve(items).unwrap();
     println!("{resolved:#?}");
+
+    let order = toposort::global_initialization_order(&resolved).unwrap();
+    println!("{order:#?}");
 }
