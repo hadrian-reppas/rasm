@@ -94,7 +94,7 @@ impl Parser {
                 self.expect(TokenKind::Assign)?;
                 let expr = self.expr(BindingPower::Start, false)?;
                 self.expect(TokenKind::Semi)?;
-                Ok(Item::Global { name, expr })
+                Ok(Item::Static { name, expr })
             }
             _ => Err(Error {
                 msg: "expected `fn` or `let`".to_string(),
@@ -222,7 +222,7 @@ impl Parser {
                 let token = self.expect(TokenKind::Return)?;
                 if !allow_return {
                     return Err(Error {
-                        msg: "`return` not allowed in global initializers".to_string(),
+                        msg: "`return` not allowed in static initializers".to_string(),
                         span: token.span,
                     });
                 }

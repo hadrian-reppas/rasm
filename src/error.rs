@@ -23,6 +23,7 @@ pub struct Error {
 
 impl Error {
     pub fn print(&self) {
+        dbg!(self);
         todo!()
     }
 }
