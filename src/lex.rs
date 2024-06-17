@@ -2,6 +2,7 @@ use crate::error::{Error, Span};
 
 pub struct Lexer {
     suffix: &'static str,
+    code: &'static str,
     line: usize,
     column: usize,
 }
@@ -10,6 +11,7 @@ impl Lexer {
     pub fn new(code: &'static str) -> Self {
         Lexer {
             suffix: code,
+            code,
             line: 1,
             column: 0,
         }
@@ -18,6 +20,7 @@ impl Lexer {
     fn make_span(&mut self, len: usize) -> Span {
         let span = Span {
             text: &self.suffix[..len],
+            code: self.code,
             line: self.line,
             column: self.column,
         };
