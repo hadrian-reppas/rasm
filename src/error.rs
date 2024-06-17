@@ -20,3 +20,9 @@ pub struct Error {
     pub span: Span,
     pub msg: String,
 }
+
+impl Error {
+    pub fn print(&self) {
+        todo!()
+    }
+}
