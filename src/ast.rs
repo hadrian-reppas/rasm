@@ -93,7 +93,7 @@ impl TryFrom<Expr> for PlaceExpr {
 
 impl Expr {
     pub fn ends_with_block(&self) -> bool {
-        matches!(self, Expr::Block(_) | Expr::If { .. })
+        matches!(self, Expr::Block(_) | Expr::If { .. } | Expr::For { .. })
     }
 }
 
