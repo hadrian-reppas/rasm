@@ -26,9 +26,18 @@ pub fn compile(
 ) -> Result<(), Error> {
     let mut codegen = Codegen::new(resolved);
 
-    // TODO: initialize statics
+    let init_id = *codegen.function_ids.last().unwrap();
     for (function, id) in resolved.functions.iter().zip(codegen.function_ids.clone()) {
-        codegen.compile_function(&function, id);
+        if function.name == "main" && !init_order.is_empty() {
+            codegen.compile_function(&function, id, Some(init_id));
+        } else {
+            codegen.compile_function(&function, id, None);
+        }
+    }
+
+    if !init_order.is_empty() {
+        let init = make_init_function(&resolved.statics, init_order);
+        codegen.compile_function(&init, init_id, None);
     }
 
     let object = codegen.module.finish().object;
@@ -42,12 +51,6 @@ pub fn compile(
         span: Span::empty(),
     })?;
 
-    // TODO: remove
-    std::fs::File::create("temp.o")
-        .unwrap()
-        .write(&bytes)
-        .unwrap();
-
     let result = Command::new("cc")
         .arg("-o")
         .arg(output_file_path)
@@ -60,6 +63,32 @@ pub fn compile(
             msg: "linker error".to_string(),
             span: Span::empty(),
         }),
+    }
+}
+
+fn make_init_function(statics: &[Static], init_order: &[StaticId]) -> Function {
+    let mut stmts = Vec::new();
+    for static_id in init_order {
+        stmts.push(Stmt::Expr(Expr::Assign {
+            target: AssignTargetExpr::Static(*static_id),
+            rhs: Box::new(statics[*static_id].expr.clone()),
+        }));
+    }
+    let block = Block { stmts, expr: None };
+
+    let transient_locals = statics.iter().map(|s| s.transient_locals).max().unwrap();
+    let stack_locals = statics.iter().map(|s| s.stack_locals).max().unwrap();
+
+    Function {
+        name: String::new(),
+        span: Span::empty(),
+        id: FunctionId::MAX,
+        params: Vec::new(),
+        block,
+        transient_locals,
+        stack_locals,
+        static_dependencies: Vec::new(),
+        function_dependencies: Vec::new(),
     }
 }
 
@@ -94,6 +123,7 @@ impl Codegen {
                 .declare_data(&format!("${i}"), Linkage::Local, false, false)
                 .unwrap();
             description.define(null_terminated.into());
+            description.align = Some(SIZEOF_INT as u64);
             module.define_data(id, &description).unwrap();
             description.clear();
             string_ids.push(id);
@@ -105,6 +135,7 @@ impl Codegen {
                 .declare_data(&static_.name, Linkage::Local, true, false)
                 .unwrap();
             description.define_zeroinit(SIZEOF_INT);
+            description.align = Some(SIZEOF_INT as u64);
             module.define_data(id, &description).unwrap();
             description.clear();
             static_ids.push(id);
@@ -123,6 +154,13 @@ impl Codegen {
             context.clear();
         }
 
+        if !resolved.statics.is_empty() {
+            let id = module
+                .declare_function("$init", Linkage::Export, &context.func.signature)
+                .unwrap();
+            function_ids.push(id);
+        }
+
         Codegen {
             module,
             context,
@@ -134,7 +172,7 @@ impl Codegen {
         }
     }
 
-    fn compile_function(&mut self, function: &Function, id: FuncId) {
+    fn compile_function(&mut self, function: &Function, id: FuncId, init_id: Option<FuncId>) {
         let int = AbiParam::new(self.int);
         for _ in &function.params {
             self.context.func.signature.params.push(int);
@@ -163,6 +201,10 @@ impl Codegen {
         builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
         builder.seal_block(block);
+        if let Some(init_id) = init_id {
+            let func_ref = self.module.declare_func_in_func(init_id, &mut builder.func);
+            builder.ins().call(func_ref, &[]);
+        }
 
         for (i, param) in function.params.iter().enumerate() {
             let val = builder.block_params(block)[i];
