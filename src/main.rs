@@ -13,7 +13,7 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let input_file_path = args.next().unwrap();
     let maybe_out = args.next();
-    let output_file_path = maybe_out.as_ref().map(String::as_str).unwrap_or("out");
+    let output_file_path = maybe_out.as_deref().unwrap_or("out");
 
     match compile(&input_file_path, output_file_path) {
         Ok(()) => ExitCode::SUCCESS,

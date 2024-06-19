@@ -1,4 +1,6 @@
-use crate::ast::*;
+use crate::ast::{
+    AssignOp, BinaryOp, Block, ElseIf, Expr, ForInit, Item, Name, PlaceExpr, Stmt, UnaryOp,
+};
 use crate::error::Error;
 use crate::lex::{Lexer, Token, TokenKind};
 

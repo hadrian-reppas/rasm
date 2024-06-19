@@ -29,9 +29,9 @@ pub fn compile(
     let init_id = *codegen.function_ids.last().unwrap();
     for (function, id) in resolved.functions.iter().zip(codegen.function_ids.clone()) {
         if function.name == "main" && !init_order.is_empty() {
-            codegen.compile_function(&function, id, Some(init_id));
+            codegen.compile_function(function, id, Some(init_id));
         } else {
-            codegen.compile_function(&function, id, None);
+            codegen.compile_function(function, id, None);
         }
     }
 
@@ -202,7 +202,7 @@ impl Codegen {
         builder.switch_to_block(block);
         builder.seal_block(block);
         if let Some(init_id) = init_id {
-            let func_ref = self.module.declare_func_in_func(init_id, &mut builder.func);
+            let func_ref = self.module.declare_func_in_func(init_id, builder.func);
             builder.ins().call(func_ref, &[]);
         }
 
@@ -685,7 +685,7 @@ impl<'a> Translator<'a> {
         } else {
             let global = self
                 .module
-                .declare_data_in_func(self.string_ids[id], &mut self.builder.func);
+                .declare_data_in_func(self.string_ids[id], self.builder.func);
             self.string_globals[id] = Some(global);
             self.builder.ins().global_value(self.int, global)
         }
@@ -697,7 +697,7 @@ impl<'a> Translator<'a> {
         } else {
             let global = self
                 .module
-                .declare_data_in_func(self.static_ids[id], &mut self.builder.func);
+                .declare_data_in_func(self.static_ids[id], self.builder.func);
             self.static_globals[id] = Some(global);
             global
         }
@@ -726,7 +726,7 @@ impl<'a> Translator<'a> {
         } else {
             let func_ref = self
                 .module
-                .declare_func_in_func(self.function_ids[id], &mut self.builder.func);
+                .declare_func_in_func(self.function_ids[id], self.builder.func);
             self.function_refs[id] = Some(func_ref);
             func_ref
         }

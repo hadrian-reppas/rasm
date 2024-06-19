@@ -183,7 +183,7 @@ impl<'a> Resolver<'a> {
         strings: &'a mut HashMap<String, StringId>,
     ) -> Result<Self, Error> {
         let mut param_map = HashMap::new();
-        for (local_id, param) in params.into_iter().enumerate() {
+        for (local_id, param) in params.iter().enumerate() {
             if param_map.contains_key(&param.name) {
                 return Err(Error {
                     msg: format!("duplicate parameter `{}`", param.name),
