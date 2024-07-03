@@ -1,0 +1,6 @@
+let s = "string";
+
+fn main() {
+	let y = &s;
+	alloc(1)
+}

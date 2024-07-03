@@ -1,0 +1,26 @@
+fn main() {
+	foo(bar(), baz);
+	1 + *baz;
+	strlen("string");
+	x + 5
+}
+
+fn foo(x, y) {
+	x + *y + bar()
+}
+
+fn strlen(ptr) {
+	if (*ptr == 0) {
+		0
+	} else {
+		1
+	}
+}
+
+let x = bar();
+let baz = &y;
+let y = 0;
+
+fn bar() {
+	baz
+}

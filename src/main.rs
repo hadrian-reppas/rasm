@@ -1,9 +1,18 @@
 use std::process::ExitCode;
 
 mod ast;
+<<<<<<< HEAD
 mod codegen;
 mod error;
 mod lex;
+=======
+mod builtins;
+mod codegen;
+mod error;
+mod ir;
+mod lex;
+mod lower;
+>>>>>>> dbdeb72 (start ir)
 mod parse;
 mod resolve;
 mod resolved;
