@@ -79,7 +79,7 @@ fn make_statics_and_functions(
     let mut statics = HashMap::new();
     let mut functions: HashMap<_, _> = BUILTIN_FUNCTIONS
         .iter()
-        .map(|f| f.name.to_string())
+        .map(ToString::to_string)
         .zip(0..)
         .collect();
 

@@ -1,0 +1,11 @@
+fn foo(x, y) {
+	y = 2;
+	y = &x;
+	*y = x;
+	x = 3;
+	x
+}
+
+fn main() {
+	foo(1, 2)
+}

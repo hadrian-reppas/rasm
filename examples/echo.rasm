@@ -1,0 +1,6 @@
+fn main(argc, argv) {
+	for (let i = 1; i < argc; i += 1) {
+		puts(argv[i]);
+		puts("\n");
+	}
+}
