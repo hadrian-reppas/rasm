@@ -76,10 +76,7 @@ impl Lexer {
     fn unexpected_character(&mut self) -> Error {
         let c = self.suffix.chars().next().unwrap();
         let span = self.make_span(c.len_utf8());
-        Error {
-            msg: format!("unexpected character {c:?}"),
-            span,
-        }
+        Error::new(span, format!("unexpected character {c:?}"))
     }
 
     pub fn next(&mut self) -> Result<Token, Error> {
@@ -192,23 +189,22 @@ impl Lexer {
         if token.span.text.parse::<i64>().is_ok() {
             Ok(token)
         } else {
-            Err(Error {
-                msg: format!("int literal must be between {} and {}", i64::MIN, i64::MAX),
-                span: token.span,
-            })
+            Err(Error::new(
+                token.span,
+                format!("int literal must be between {} and {}", i64::MIN, i64::MAX),
+            ))
         }
     }
 
     fn char_len(&mut self, len: usize, in_string: bool) -> Result<Option<usize>, Error> {
         match self.suffix[len..].chars().next() {
-            None | Some('\n') => Err(Error {
-                msg: if in_string {
-                    "unterminated string literal".to_string()
+            None | Some('\n') => {
+                if in_string {
+                    Err(Error::new(self.make_span(1), "unterminated string literal"))
                 } else {
-                    "unterminated char literal".to_string()
-                },
-                span: self.make_span(1),
-            }),
+                    Err(Error::new(self.make_span(1), "unterminated char literal"))
+                }
+            }
             Some('\\') => match self.suffix[len..].chars().nth(1) {
                 Some('n' | 't' | '\\') => Ok(Some(len + 2)),
                 Some('"') if in_string => Ok(Some(len + 2)),
@@ -216,10 +212,10 @@ impl Lexer {
                 c => {
                     self.make_span(len);
                     let span_len = if c.is_some() { 2 } else { 1 };
-                    Err(Error {
-                        msg: "invalid escape sequence".to_string(),
-                        span: self.make_span(span_len),
-                    })
+                    Err(Error::new(
+                        self.make_span(span_len),
+                        "invalid escape sequence",
+                    ))
                 }
             },
             Some('"') if in_string => Ok(None),
@@ -230,19 +226,13 @@ impl Lexer {
 
     fn char_literal(&mut self) -> Result<Token, Error> {
         let Some(len) = self.char_len(1, false)? else {
-            return Err(Error {
-                msg: "empty char literal".to_string(),
-                span: self.make_span(2),
-            });
+            return Err(Error::new(self.make_span(2), "empty char literal"));
         };
 
         if self.suffix[len..].starts_with('\'') {
             Ok(self.make_token(TokenKind::Char, len + 1))
         } else {
-            Err(Error {
-                msg: "unterminated char literal".to_string(),
-                span: self.make_span(len),
-            })
+            Err(Error::new(self.make_span(len), "unterminated char literal"))
         }
     }
 

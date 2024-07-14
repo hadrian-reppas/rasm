@@ -8,24 +8,33 @@ pub struct Span {
     pub column: usize,
 }
 
-impl Span {
-    pub fn empty() -> Self {
-        Span {
+#[derive(Debug)]
+pub struct Error {
+    span: Span,
+    msg: String,
+}
+
+impl Error {
+    pub fn new(span: Span, msg: impl ToString) -> Self {
+        Error {
+            span,
+            msg: msg.to_string(),
+        }
+    }
+
+    pub fn msg(msg: impl ToString) -> Self {
+        let span = Span {
             text: "",
             code: "",
             line: 0,
             column: 0,
+        };
+        Error {
+            span,
+            msg: msg.to_string(),
         }
     }
-}
 
-#[derive(Debug)]
-pub struct Error {
-    pub span: Span,
-    pub msg: String,
-}
-
-impl Error {
     pub fn print(&self) {
         println!(
             "{}{}error:{} {}{}",

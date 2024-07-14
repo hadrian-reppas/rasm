@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::builtins::BUILTIN_FUNCTIONS;
-use crate::error::{Error, Span};
+use crate::error::Error;
 use crate::resolve::{Resolved, StaticId};
 
 pub fn static_initialization_order(resolved: &Resolved) -> Result<Vec<StaticId>, Error> {
@@ -34,10 +34,8 @@ pub fn static_initialization_order(resolved: &Resolved) -> Result<Vec<StaticId>,
         static_dependencies[static_.id] = dependencies.into_iter().collect();
     }
 
-    toposort(&static_dependencies).ok_or(Error {
-        msg: "cycle detected during static initialization".to_string(),
-        span: Span::empty(),
-    })
+    toposort(&static_dependencies)
+        .ok_or_else(|| Error::msg("cycle detected during static initialization"))
 }
 
 fn toposort(graph: &[Vec<StaticId>]) -> Option<Vec<StaticId>> {
