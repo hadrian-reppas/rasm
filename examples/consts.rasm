@@ -1,0 +1,15 @@
+let ret = puts(text);
+let len = read(text);
+let text = "Hello, world!\n";
+
+fn read(s) { *s }
+
+fn main() {
+	putd(ret);
+	putc('\n');
+
+	putd(ret);
+	putc('\n');
+
+	puts(text);
+}
