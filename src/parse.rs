@@ -223,9 +223,9 @@ impl Parser {
                     ));
                 }
                 let expr = if self.peek().kind.is_expr_start() {
-                    None
-                } else {
                     Some(Box::new(self.expr(BindingPower::Start, allow_return)?))
+                } else {
+                    None
                 };
                 Expr::Return(expr)
             }
