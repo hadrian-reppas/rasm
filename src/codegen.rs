@@ -3,11 +3,13 @@ use std::io::Write as _;
 
 use tempfile::NamedTempFile;
 
-use crate::ast::BinaryOp;
+use crate::ast::{AssignOp, BinaryOp, UnaryOp};
 use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
 use crate::resolve::{FunctionId, Local, Resolved, StaticId, StringId};
-use crate::resolved::{AddrOfExpr, Block, Expr, Function, Static, Stmt};
+use crate::resolved::{
+    AddrOfExpr, AssignTargetExpr, Block, ElseIf, Expr, ForInit, Function, Static, Stmt,
+};
 
 const RASM_PREFIX: &'static str = "$";
 const PRELUDE: &'static str = r#"
@@ -53,7 +55,7 @@ struct Codegen<'a> {
     statics: &'a [Static],
     strings: &'a [String],
     init_order: &'a [StaticId],
-    value_id_counter: ValueId,
+    id_counter: usize,
 }
 
 macro_rules! push {
@@ -93,7 +95,7 @@ impl<'a> Codegen<'a> {
             statics,
             strings,
             init_order,
-            value_id_counter: 0,
+            id_counter: 0,
         };
 
         for builtin in BUILTIN_FUNCTIONS {
@@ -111,9 +113,9 @@ impl<'a> Codegen<'a> {
         codegen
     }
 
-    fn value_id(&mut self) -> ValueId {
-        let id = self.value_id_counter;
-        self.value_id_counter += 1;
+    fn next_id(&mut self) -> usize {
+        let id = self.id_counter;
+        self.id_counter += 1;
         id
     }
 
@@ -165,7 +167,15 @@ impl<'a> Codegen<'a> {
         }
         pushln!(self, "  %x = call ptr @setlocale(i32 0, ptr @empty_str)");
 
-        pushln!(self, "  ; TODO: initialize statics");
+        for static_id in self.init_order {
+            let static_ = &self.statics[*static_id];
+            let value = self.expr(&static_.expr);
+            pushln!(
+                self,
+                "  store i64 %v{value}, ptr @{RASM_PREFIX}{}, align 8",
+                static_.name
+            );
+        }
 
         let main = self.functions.iter().find(|f| f.name == "main").unwrap();
 
@@ -263,9 +273,9 @@ impl<'a> Codegen<'a> {
             Expr::Block(block) => self.block(block),
             Expr::AddrOf(expr) => self.addr_of_expr(expr),
             Expr::Binary { op, lhs, rhs } => self.binary_expr(*op, lhs, rhs),
-            Expr::Unary { op, expr } => todo!(),
-            Expr::Assign { target, rhs } => todo!(),
-            Expr::AssignOp { op, target, rhs } => todo!(),
+            Expr::Unary { op, expr } => self.unary_expr(*op, expr),
+            Expr::Assign { target, rhs } => self.assign_expr(target, rhs),
+            Expr::AssignOp { op, target, rhs } => self.assign_op_expr(*op, target, rhs),
             Expr::Index { target, index } => self.index_expr(target, index),
             Expr::Call { func, args } => self.call_expr(func, args),
             Expr::If {
@@ -273,13 +283,13 @@ impl<'a> Codegen<'a> {
                 if_block,
                 else_ifs,
                 else_block,
-            } => todo!(),
+            } => self.if_expr(test, if_block, else_ifs, else_block.as_ref()),
             Expr::For {
                 init,
                 test,
                 update,
                 block,
-            } => todo!(),
+            } => self.for_expr(init.as_ref(), test.as_deref(), update.as_deref(), block),
             Expr::Return(expr) => {
                 if let Some(expr) = expr {
                     let value = self.expr(expr);
@@ -291,19 +301,19 @@ impl<'a> Codegen<'a> {
     }
 
     fn string_literal(&mut self, string_id: StringId) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(self, "  %v{id} = ptrtoint ptr @str{string_id} to i64");
         id
     }
 
     fn int_literal(&mut self, value: i64) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(self, "  %v{id} = add i64 {value}, 0");
         id
     }
 
     fn load_static(&mut self, static_id: StaticId) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(
             self,
             "  %v{id} = load i64, ptr @{RASM_PREFIX}{}, align 8",
@@ -321,7 +331,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn function_ref(&mut self, function_id: FunctionId) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(
             self,
             "  %v{id} = ptrtoint ptr @{RASM_PREFIX}{} to i64",
@@ -331,7 +341,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn variable(&mut self, variable_id: usize, prefix: &str) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(
             self,
             "  %v{id} = load i64, ptr %{prefix}{variable_id}, align 8"
@@ -342,7 +352,7 @@ impl<'a> Codegen<'a> {
     fn addr_of_expr(&mut self, expr: &AddrOfExpr) -> ValueId {
         match expr {
             AddrOfExpr::Static(static_id) => {
-                let id = self.value_id();
+                let id = self.next_id();
                 pushln!(
                     self,
                     "  %v{id} = ptrtoint ptr @{RASM_PREFIX}{} to i64",
@@ -351,7 +361,7 @@ impl<'a> Codegen<'a> {
                 id
             }
             AddrOfExpr::Stack(stack_id) => {
-                let id = self.value_id();
+                let id = self.next_id();
                 pushln!(self, "  %v{id} = ptrtoint ptr %s{stack_id} to i64");
                 id
             }
@@ -404,13 +414,33 @@ impl<'a> Codegen<'a> {
 
         let lhs_value = self.expr(lhs);
         let rhs_value = self.expr(rhs);
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(self, "  %v{id} = {instr} i64 %v{lhs_value}, %v{rhs_value}");
         id
     }
 
     fn cmp_epxr(&mut self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> ValueId {
-        todo!()
+        let instr = match op {
+            BinaryOp::Lt => "slt",
+            BinaryOp::Le => "sle",
+            BinaryOp::Gt => "sgt",
+            BinaryOp::Ge => "sge",
+            BinaryOp::Eq => "eq",
+            BinaryOp::Ne => "ne",
+            _ => unreachable!(),
+        };
+
+        let lhs_value = self.expr(lhs);
+        let rhs_value = self.expr(rhs);
+        let cmp_value = self.next_id();
+        pushln!(
+            self,
+            "  %v{cmp_value} = icmp {instr} i64 %v{lhs_value}, %v{rhs_value}"
+        );
+
+        let id = self.next_id();
+        pushln!(self, "  %v{id} = zext i1 %v{cmp_value} to i64");
+        id
     }
 
     fn logical_and_expr(&mut self, lhs: &Expr, rhs: &Expr) -> ValueId {
@@ -421,11 +451,38 @@ impl<'a> Codegen<'a> {
         todo!()
     }
 
+    fn unary_expr(&mut self, op: UnaryOp, expr: &Expr) -> ValueId {
+        let value = self.expr(expr);
+        let id = self.next_id();
+        match op {
+            UnaryOp::Negate => pushln!(self, "  %v{id} = sub i64 0, %v{value}"),
+            UnaryOp::BitNot => pushln!(self, "  %v{id} = xor i64 -1, %v{value}"),
+            UnaryOp::LogicalNot => {
+                let cmp_value = self.next_id();
+                pushln!(self, "  %v{cmp_value} = icmp eq i64 %v{value}, 0");
+                pushln!(self, "  %v{id} = zext i1 %v{cmp_value} to i64");
+            }
+            UnaryOp::Deref => {
+                let ptr_value = self.int_to_ptr(value);
+                pushln!(self, "  %v{id} = load i64, ptr %v{ptr_value}, align 8");
+            }
+        }
+        id
+    }
+
+    fn assign_expr(&mut self, target: &AssignTargetExpr, rhs: &Expr) -> ValueId {
+        todo!()
+    }
+
+    fn assign_op_expr(&mut self, op: AssignOp, target: &AssignTargetExpr, rhs: &Expr) -> ValueId {
+        todo!()
+    }
+
     fn index_addr(&mut self, target: &Expr, index: &Expr) -> ValueId {
         let base_value = self.expr(target);
         let base_ptr = self.int_to_ptr(base_value);
         let index_value = self.expr(index);
-        let addr_ptr = self.value_id();
+        let addr_ptr = self.next_id();
         pushln!(
             self,
             "  %v{addr_ptr} = getelementptr i64, ptr %v{base_ptr}, i64 %v{index_value}"
@@ -434,7 +491,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn index_expr(&mut self, target: &Expr, index: &Expr) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         let addr_ptr = self.index_addr(target, index);
         pushln!(self, "  %v{id} = load i64, ptr %v{addr_ptr}, align 8");
         id
@@ -446,7 +503,7 @@ impl<'a> Codegen<'a> {
 
         let arg_values: Vec<_> = args.iter().map(|arg| self.expr(arg)).collect();
 
-        let id = self.value_id();
+        let id = self.next_id();
         push!(self, "  %v{id} = call i64 %v{func_ptr}(");
         for (i, arg_value) in arg_values.iter().enumerate() {
             if i > 0 {
@@ -458,14 +515,34 @@ impl<'a> Codegen<'a> {
         id
     }
 
+    fn if_expr(
+        &mut self,
+        test: &Expr,
+        if_block: &Block,
+        else_ifs: &[ElseIf],
+        else_block: Option<&Block>,
+    ) -> ValueId {
+        todo!()
+    }
+
+    fn for_expr(
+        &mut self,
+        init: Option<&ForInit>,
+        test: Option<&Expr>,
+        udpate: Option<&Expr>,
+        block: &Block,
+    ) -> ValueId {
+        todo!()
+    }
+
     fn int_to_ptr(&mut self, value: ValueId) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(self, "  %v{id} = inttoptr i64 %v{value} to ptr");
         id
     }
 
     fn ptr_to_int(&mut self, value: ValueId) -> ValueId {
-        let id = self.value_id();
+        let id = self.next_id();
         pushln!(self, "  %v{id} = ptrtoint ptr %v{value} to i64");
         id
     }
