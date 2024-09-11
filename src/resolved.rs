@@ -75,7 +75,7 @@ pub enum Expr {
         else_block: Option<Block>,
     },
     For {
-        init: Option<ForInit>,
+        init: Option<Box<Expr>>,
         test: Option<Box<Expr>>,
         update: Option<Box<Expr>>,
         block: Block,
@@ -101,18 +101,6 @@ pub enum AssignTargetExpr {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    pub stmts: Vec<Stmt>,
+    pub stmts: Vec<Expr>,
     pub expr: Option<Box<Expr>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Stmt {
-    Let { id: Local, expr: Expr },
-    Expr(Expr),
-}
-
-#[derive(Debug, Clone)]
-pub enum ForInit {
-    Let { id: Local, expr: Box<Expr> },
-    Expr(Box<Expr>),
 }
