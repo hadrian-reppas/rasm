@@ -1,4 +1,7 @@
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+use clap::Parser;
 
 mod ast;
 mod builtins;
@@ -10,13 +13,24 @@ mod resolve;
 mod resolved;
 mod toposort;
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let maybe_input = args.next();
-    let maybe_out = args.next();
-    let output_file = maybe_out.as_deref().unwrap_or("out");
+#[derive(Parser)]
+struct Arguments {
+    /// The input .rasm file
+    input: PathBuf,
 
-    match compile(maybe_input.as_deref(), output_file) {
+    /// The output file
+    #[arg(default_value = "out")]
+    output: PathBuf,
+
+    /// Optimize output
+    #[arg(short = 't', long = "release")]
+    release: bool,
+}
+
+fn main() -> ExitCode {
+    let args = Arguments::parse();
+
+    match compile(&args.input, &args.output, args.release) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             error.print();
@@ -25,13 +39,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn compile(maybe_input: Option<&str>, output_file: &str) -> Result<(), error::Error> {
-    let Some(input_file) = maybe_input else {
-        return Err(error::Error::msg("no input file"));
-    };
-
-    let code = std::fs::read_to_string(input_file)
-        .map_err(|_| error::Error::msg(format!("cannot read file {input_file:?}")))?
+fn compile(input: &Path, output: &Path, release: bool) -> Result<(), error::Error> {
+    let code = std::fs::read_to_string(input)
+        .map_err(|_| error::Error::msg(format!("cannot read file {input:?}")))?
         .leak();
 
     let items = parse::parse(code)?;
@@ -42,11 +52,13 @@ fn compile(maybe_input: Option<&str>, output_file: &str) -> Result<(), error::Er
     let object_file = tempfile::NamedTempFile::with_prefix(".o")
         .map_err(|_| error::Error::msg("cannot create temporary object file"))?;
 
+    let opt_level = if release { "-O3" } else { "-O0" };
     let llc_status = Command::new("llc")
         .arg(llvm_file.path())
         .arg("-filetype=obj")
         .arg("-o")
         .arg(object_file.path())
+        .arg(opt_level)
         .status()
         .map_err(|_| error::Error::msg("cannot invoke llc"))?;
     if !llc_status.success() {
@@ -56,7 +68,7 @@ fn compile(maybe_input: Option<&str>, output_file: &str) -> Result<(), error::Er
     let cc_status = Command::new("cc")
         .arg(object_file.path())
         .arg("-o")
-        .arg(output_file)
+        .arg(output)
         .status()
         .map_err(|_| error::Error::msg("cannot invoke linker"))?;
     if !cc_status.success() {
