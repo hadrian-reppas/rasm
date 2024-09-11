@@ -9,5 +9,7 @@ fn add(x, y) {
 }
 
 fn main(argc, argv) {
+	putc('⫷');
+	putc('\n');
 	add(argc, argv)
 }
