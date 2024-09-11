@@ -1,0 +1,12 @@
+let stack = {
+	let x = two();
+	&x
+};
+
+let unicode = "hello, გთხოვთ\tコンニチハ\"\\\n";
+
+fn two() { 2 }
+
+fn main(argc, argv) {
+	argc + argv + stack
+}
