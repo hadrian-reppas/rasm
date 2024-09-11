@@ -14,6 +14,10 @@ pub fn static_initialization_order(resolved: &Resolved) -> Result<Vec<StaticId>,
             static_.function_dependencies.iter().copied().collect();
 
         while let Some(function_id) = function_stack.pop() {
+            if function_id < BUILTIN_FUNCTIONS.len() {
+                continue;
+            }
+
             dependencies.extend(
                 resolved.functions[function_id - BUILTIN_FUNCTIONS.len()]
                     .static_dependencies
