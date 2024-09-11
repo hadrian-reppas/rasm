@@ -346,15 +346,10 @@ impl<'a> Resolver<'a> {
             ast::Expr::If {
                 test,
                 if_block,
-                else_ifs,
                 else_block,
             } => {
                 self.visit_expr(test)?;
                 self.visit_block(if_block)?;
-                for ast::ElseIf { test, block } in else_ifs {
-                    self.visit_expr(test)?;
-                    self.visit_block(block)?;
-                }
                 if let Some(else_block) = else_block {
                     self.visit_block(else_block)?;
                 }
@@ -492,15 +487,10 @@ impl<'a> Resolver<'a> {
             ast::Expr::If {
                 test,
                 if_block,
-                else_ifs,
                 else_block,
             } => Ok(resolved::Expr::If {
                 test: Box::new(self.convert_expr(*test)?),
                 if_block: self.convert_block(if_block)?,
-                else_ifs: else_ifs
-                    .into_iter()
-                    .map(|else_if| self.convert_else_if(else_if))
-                    .collect::<Result<_, _>>()?,
                 else_block: if let Some(else_block) = else_block {
                     Some(self.convert_block(else_block)?)
                 } else {
@@ -553,13 +543,6 @@ impl<'a> Resolver<'a> {
                 })
             }
         }
-    }
-
-    fn convert_else_if(&mut self, else_if: ast::ElseIf) -> Result<resolved::ElseIf, Error> {
-        Ok(resolved::ElseIf {
-            test: self.convert_expr(else_if.test)?,
-            block: self.convert_block(else_if.block)?,
-        })
     }
 
     fn convert_assign_target_expr(

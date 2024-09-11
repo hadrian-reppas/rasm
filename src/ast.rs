@@ -57,7 +57,6 @@ pub enum Expr {
     If {
         test: Box<Expr>,
         if_block: Block,
-        else_ifs: Vec<ElseIf>,
         else_block: Option<Block>,
     },
     For {
@@ -141,12 +140,6 @@ pub enum AssignOp {
     BitAnd,
     BitXor,
     BitOr,
-}
-
-#[derive(Debug, Clone)]
-pub struct ElseIf {
-    pub test: Expr,
-    pub block: Block,
 }
 
 #[derive(Debug, Clone)]

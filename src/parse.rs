@@ -1,6 +1,4 @@
-use crate::ast::{
-    AssignOp, BinaryOp, Block, ElseIf, Expr, ForInit, Item, Name, PlaceExpr, Stmt, UnaryOp,
-};
+use crate::ast::{AssignOp, BinaryOp, Block, Expr, ForInit, Item, Name, PlaceExpr, Stmt, UnaryOp};
 use crate::error::Error;
 use crate::lex::{Lexer, Token, TokenKind};
 
@@ -193,27 +191,7 @@ impl Parser {
                 self.expect(TokenKind::RightParen)?;
                 expr
             }
-            TokenKind::If => {
-                let (test, if_block) = self.if_test_and_block(allow_return)?;
-                let mut else_ifs = Vec::new();
-                let mut else_block = None;
-                while self.peek().kind == TokenKind::Else {
-                    self.expect(TokenKind::Else)?;
-                    if self.peek().kind == TokenKind::If {
-                        let (test, block) = self.if_test_and_block(allow_return)?;
-                        else_ifs.push(ElseIf { test, block });
-                    } else {
-                        else_block = Some(self.block(allow_return)?);
-                        break;
-                    }
-                }
-                Expr::If {
-                    test: Box::new(test),
-                    if_block,
-                    else_ifs,
-                    else_block,
-                }
-            }
+            TokenKind::If => self.if_expr(allow_return)?,
             TokenKind::Return => {
                 let token = self.expect(TokenKind::Return)?;
                 if !allow_return {
@@ -438,13 +416,33 @@ impl Parser {
         }
     }
 
-    fn if_test_and_block(&mut self, allow_return: bool) -> Result<(Expr, Block), Error> {
+    fn if_expr(&mut self, allow_return: bool) -> Result<Expr, Error> {
         self.expect(TokenKind::If)?;
         self.expect(TokenKind::LeftParen)?;
         let test = self.expr(BindingPower::Start, allow_return)?;
         self.expect(TokenKind::RightParen)?;
-        let then = self.block(allow_return)?;
-        Ok((test, then))
+        let if_block = self.block(allow_return)?;
+
+        let else_block = if self.peek().kind == TokenKind::Else {
+            self.expect(TokenKind::Else)?;
+            if self.peek().kind == TokenKind::If {
+                let expr = self.if_expr(allow_return)?;
+                Some(Block {
+                    stmts: Vec::new(),
+                    expr: Some(Box::new(expr)),
+                })
+            } else {
+                Some(self.block(allow_return)?)
+            }
+        } else {
+            None
+        };
+
+        Ok(Expr::If {
+            test: Box::new(test),
+            if_block,
+            else_block,
+        })
     }
 }
 
