@@ -1,3 +1,7 @@
+use std::cell::RefCell;
+use std::collections::HashSet;
+use std::path::Path;
+
 use crate::ast::{
     AssignOp, BinaryOp, Block, Expr, ForInit, Item, Name, PlaceExpr, Stmt, UnaryOp, UseTree,
     UseTreeKind,
@@ -5,22 +9,73 @@ use crate::ast::{
 use crate::error::Error;
 use crate::lex::{Lexer, Token, TokenKind};
 
-struct Parser {
+struct Parser<'a> {
     peek: Token,
     lexer: Lexer,
+    paths: &'a RefCell<HashSet<&'static Path>>,
 }
 
-pub fn parse(code: &'static str) -> Result<Vec<Item>, Error> {
-    let mut parser = Parser::new(code)?;
+pub fn parse(
+    code: &'static str,
+    path: &'static Path,
+    paths: &RefCell<HashSet<&'static Path>>,
+) -> Result<Vec<Item>, Error> {
+    let mut parser = Parser::new(code, path, paths)?;
     parser.items()
 }
 
-impl Parser {
-    fn new(code: &'static str) -> Result<Self, Error> {
-        let mut lexer = Lexer::new(code);
+fn parse_mod(
+    path: &'static Path,
+    name: &Name,
+    paths: &RefCell<HashSet<&'static Path>>,
+) -> Result<Vec<Item>, Error> {
+    let (mut file_path, mut mod_file_path) = (path.to_path_buf(), path.to_path_buf());
+    file_path.pop();
+    file_path.push(&format!("{}.rasm", name.name));
+    mod_file_path.pop();
+    mod_file_path.push(&format!("{}/mod.rasm", name.name));
+
+    let new_path = if file_path.exists() && mod_file_path.exists() {
+        return Err(Error::new(
+            name.span,
+            format!("both {file_path:?} and {mod_file_path:?} exist"),
+        ));
+    } else if file_path.exists() {
+        let new_path: &'static Path = Box::leak(Box::new(file_path));
+        new_path
+    } else if mod_file_path.exists() {
+        let new_path: &'static Path = Box::leak(Box::new(mod_file_path));
+        new_path
+    } else {
+        return Err(Error::msg(format!(
+            "neither {file_path:?} or {mod_file_path:?} exists"
+        )));
+    };
+
+    if paths.borrow().contains(new_path) {
+        return Err(Error::new(
+            name.span,
+            format!("{new_path:?} is already in module tree"),
+        ));
+    }
+    paths.borrow_mut().insert(new_path);
+    let code = std::fs::read_to_string(new_path)
+        .map_err(|_| Error::msg(format!("cannot read file {new_path:?}")))?
+        .leak();
+    parse(code, new_path, paths)
+}
+
+impl<'a> Parser<'a> {
+    fn new(
+        code: &'static str,
+        path: &'static Path,
+        paths: &'a RefCell<HashSet<&'static Path>>,
+    ) -> Result<Self, Error> {
+        let mut lexer = Lexer::new(code, path);
         Ok(Parser {
             peek: lexer.next()?,
             lexer,
+            paths,
         })
     }
 
@@ -55,13 +110,14 @@ impl Parser {
         })
     }
 
-    fn path(&mut self) -> Result<Vec<Name>, Error> {
+    fn path(&mut self) -> Result<(Vec<Name>, Name), Error> {
         let mut path = vec![self.name()?];
         while self.peek().kind == TokenKind::ColonColon {
             self.expect(TokenKind::ColonColon)?;
             path.push(self.name()?);
         }
-        Ok(path)
+        let last = path.pop().unwrap();
+        Ok((path, last))
     }
 
     fn items(&mut self) -> Result<Vec<Item>, Error> {
@@ -107,7 +163,12 @@ impl Parser {
             }
             TokenKind::Mod => {
                 self.expect(TokenKind::Mod)?;
-                Ok(Item::Mod(self.name()?))
+                let name = self.name()?;
+                self.expect(TokenKind::Semi)?;
+                Ok(Item::Mod {
+                    items: parse_mod(&self.lexer.path, &name, &self.paths)?,
+                    name,
+                })
             }
             TokenKind::Use => {
                 self.expect(TokenKind::Use)?;
@@ -248,16 +309,22 @@ impl Parser {
             TokenKind::String => Expr::String(parse_string_literal(
                 self.expect(TokenKind::String)?.span.text,
             )),
-            TokenKind::Name => Expr::Path {
-                with_crate: false,
-                path: self.path()?,
-            },
+            TokenKind::Name => {
+                let (prefix, name) = self.path()?;
+                Expr::Path {
+                    with_crate: false,
+                    prefix,
+                    name,
+                }
+            }
             TokenKind::Crate => {
                 self.expect(TokenKind::Crate)?;
                 self.expect(TokenKind::ColonColon)?;
+                let (prefix, name) = self.path()?;
                 Expr::Path {
                     with_crate: true,
-                    path: self.path()?,
+                    prefix,
+                    name,
                 }
             }
             TokenKind::LeftBrace => Expr::Block(self.block(allow_return)?),
