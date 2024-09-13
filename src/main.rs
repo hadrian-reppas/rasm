@@ -44,7 +44,7 @@ fn compile(input: &Path, output: &Path, release: bool) -> Result<(), error::Erro
         .map_err(|_| error::Error::msg(format!("cannot read file {input:?}")))?
         .leak();
 
-    let items = parse::parse(code)?;
+    let items = dbg!(parse::parse(code)?);
     let resolved = resolve::resolve(items)?;
     let init_order = toposort::static_initialization_order(&resolved)?;
 

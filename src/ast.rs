@@ -12,6 +12,23 @@ pub enum Item {
         name: Name,
         expr: Expr,
     },
+    Mod(Name),
+    Use {
+        with_crate: bool,
+        tree: UseTree,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct UseTree {
+    pub prefix: Vec<Name>,
+    pub kind: UseTreeKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum UseTreeKind {
+    Simple,
+    Nested(Vec<UseTree>),
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +42,10 @@ pub struct Name {
 pub enum Expr {
     String(String),
     Int(i64),
-    Name(Name),
+    Path {
+        with_crate: bool,
+        path: Vec<Name>,
+    },
     Block(Block),
     AddrOf(PlaceExpr),
     Binary {
@@ -70,7 +90,7 @@ pub enum Expr {
 
 #[derive(Debug, Clone)]
 pub enum PlaceExpr {
-    Name(Name),
+    Path { with_crate: bool, path: Vec<Name> },
     Deref(Box<Expr>),
     Index { target: Box<Expr>, index: Box<Expr> },
 }
@@ -79,7 +99,7 @@ impl TryFrom<Expr> for PlaceExpr {
     type Error = ();
     fn try_from(expr: Expr) -> Result<Self, Self::Error> {
         match expr {
-            Expr::Name(name) => Ok(PlaceExpr::Name(name)),
+            Expr::Path { with_crate, path } => Ok(PlaceExpr::Path { with_crate, path }),
             Expr::Unary {
                 op: UnaryOp::Deref,
                 expr,

@@ -1,4 +1,7 @@
-use crate::ast::{AssignOp, BinaryOp, Block, Expr, ForInit, Item, Name, PlaceExpr, Stmt, UnaryOp};
+use crate::ast::{
+    AssignOp, BinaryOp, Block, Expr, ForInit, Item, Name, PlaceExpr, Stmt, UnaryOp, UseTree,
+    UseTreeKind,
+};
 use crate::error::Error;
 use crate::lex::{Lexer, Token, TokenKind};
 
@@ -52,6 +55,15 @@ impl Parser {
         })
     }
 
+    fn path(&mut self) -> Result<Vec<Name>, Error> {
+        let mut path = vec![self.name()?];
+        while self.peek().kind == TokenKind::ColonColon {
+            self.expect(TokenKind::ColonColon)?;
+            path.push(self.name()?);
+        }
+        Ok(path)
+    }
+
     fn items(&mut self) -> Result<Vec<Item>, Error> {
         let mut items = Vec::new();
         while !self.at_eof() {
@@ -93,8 +105,61 @@ impl Parser {
                 self.expect(TokenKind::Semi)?;
                 Ok(Item::Static { name, expr })
             }
-            _ => Err(Error::new(self.peek().span, "expected `fn` or `let`")),
+            TokenKind::Mod => {
+                self.expect(TokenKind::Mod)?;
+                Ok(Item::Mod(self.name()?))
+            }
+            TokenKind::Use => {
+                self.expect(TokenKind::Use)?;
+                let with_crate = if self.peek().kind == TokenKind::Crate {
+                    self.expect(TokenKind::Crate)?;
+                    self.expect(TokenKind::ColonColon)?;
+                    true
+                } else {
+                    false
+                };
+                let tree = self.use_tree()?;
+                self.expect(TokenKind::Semi)?;
+                Ok(Item::Use { with_crate, tree })
+            }
+            _ => Err(Error::new(
+                self.peek().span,
+                "expected `fn`, `let`, `use` or `mod`",
+            )),
         }
+    }
+
+    fn use_tree(&mut self) -> Result<UseTree, Error> {
+        let mut prefix = vec![self.name()?];
+        while self.peek().kind == TokenKind::ColonColon {
+            self.expect(TokenKind::ColonColon)?;
+            if self.peek().kind == TokenKind::Name {
+                prefix.push(self.name()?);
+            } else {
+                self.expect(TokenKind::LeftBrace)?;
+                if self.peek().kind == TokenKind::RightBrace {
+                    self.expect(TokenKind::RightBrace)?;
+                    return Ok(UseTree {
+                        prefix,
+                        kind: UseTreeKind::Nested(Vec::new()),
+                    });
+                }
+                let mut nested = vec![self.use_tree()?];
+                while self.peek().kind != TokenKind::RightBrace {
+                    self.expect(TokenKind::Comma)?;
+                    nested.push(self.use_tree()?);
+                }
+                self.expect(TokenKind::RightBrace)?;
+                return Ok(UseTree {
+                    prefix,
+                    kind: UseTreeKind::Nested(nested),
+                });
+            }
+        }
+        Ok(UseTree {
+            prefix,
+            kind: UseTreeKind::Simple,
+        })
     }
 
     fn block(&mut self, allow_return: bool) -> Result<Block, Error> {
@@ -183,7 +248,18 @@ impl Parser {
             TokenKind::String => Expr::String(parse_string_literal(
                 self.expect(TokenKind::String)?.span.text,
             )),
-            TokenKind::Name => Expr::Name(self.name()?),
+            TokenKind::Name => Expr::Path {
+                with_crate: false,
+                path: self.path()?,
+            },
+            TokenKind::Crate => {
+                self.expect(TokenKind::Crate)?;
+                self.expect(TokenKind::ColonColon)?;
+                Expr::Path {
+                    with_crate: true,
+                    path: self.path()?,
+                }
+            }
             TokenKind::LeftBrace => Expr::Block(self.block(allow_return)?),
             TokenKind::LeftParen => {
                 self.expect(TokenKind::LeftParen)?;
