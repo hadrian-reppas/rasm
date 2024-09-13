@@ -1,0 +1,3 @@
+mod other;
+
+fn main(argc, argv) { argc }

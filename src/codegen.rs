@@ -1,5 +1,5 @@
-use std::fmt::Write as _;
-use std::io::Write as _;
+use std::collections::HashMap;
+use std::{fmt::Write as _, io::Write as _};
 
 use tempfile::NamedTempFile;
 
@@ -9,9 +9,8 @@ use crate::error::Error;
 use crate::resolve::{FunctionId, Local, Resolved, StackId, StaticId, StringId, TransientId};
 use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, Function, Static};
 
-const RASM_PREFIX: &str = "$";
 const PRELUDE: &str = r#"
-@__stdoutp= external global ptr, align 8
+@__stdoutp = external global ptr, align 8
 @__stdinp = external global ptr, align 8
 
 declare i32 @printf(ptr, ...)
@@ -40,7 +39,7 @@ pub fn generate(resolved: &Resolved, init_order: &[StaticId]) -> Result<NamedTem
 
     let mut file = NamedTempFile::with_prefix(".ll")
         .map_err(|_| Error::msg("cannot create temporary llvm file"))?;
-    file.write(codegen.llvm.as_bytes())
+    file.write(codegen.code.as_bytes())
         .map_err(|_| Error::msg("cannot write to temporary llvm file"))?;
     Ok(file)
 }
@@ -48,10 +47,10 @@ pub fn generate(resolved: &Resolved, init_order: &[StaticId]) -> Result<NamedTem
 type ValueId = usize;
 
 struct Codegen<'a> {
-    llvm: String,
-    functions: &'a [Function],
-    statics: &'a [Static],
-    strings: &'a [String],
+    code: String,
+    functions: &'a HashMap<FunctionId, Function>,
+    statics: &'a HashMap<StringId, Static>,
+    strings: &'a HashMap<StringId, String>,
     init_order: &'a [StaticId],
     id_counter: usize,
     current_block: usize,
@@ -59,37 +58,37 @@ struct Codegen<'a> {
 
 macro_rules! push {
     ($self:expr, $pat:expr, $($args:expr),*) => {
-        write!($self.llvm, $pat, $($args),*).unwrap()
+        write!($self.code, $pat, $($args),*).unwrap()
     };
 
     ($self:expr, $pat:expr) => {
-        write!($self.llvm, $pat).unwrap()
+        write!($self.code, $pat).unwrap()
     };
 }
 
 macro_rules! pushln {
     ($self:expr, $pat:expr, $($args:expr),*) => {
-        writeln!($self.llvm, $pat, $($args),*).unwrap()
+        writeln!($self.code, $pat, $($args),*).unwrap()
     };
 
     ($self:expr, $pat:expr) => {
-        writeln!($self.llvm, $pat).unwrap()
+        writeln!($self.code, $pat).unwrap()
     };
 
     ($self:expr) => {
-        $self.llvm.push('\n')
+        $self.code.push('\n')
     }
 }
 
 impl<'a> Codegen<'a> {
     fn new(
-        functions: &'a [Function],
-        statics: &'a [Static],
-        strings: &'a [String],
+        functions: &'a HashMap<FunctionId, Function>,
+        statics: &'a HashMap<StaticId, Static>,
+        strings: &'a HashMap<StringId, String>,
         init_order: &'a [StaticId],
     ) -> Self {
         let mut codegen = Codegen {
-            llvm: PRELUDE.to_string(),
+            code: PRELUDE.to_string(),
             functions,
             statics,
             strings,
@@ -99,7 +98,7 @@ impl<'a> Codegen<'a> {
         };
 
         for builtin in BUILTIN_FUNCTIONS {
-            push!(codegen, "define i64 @{RASM_PREFIX}{}(", builtin.name);
+            push!(codegen, "define i64 @std.intrinsic.{}(", builtin.name);
             for param in 0..builtin.params {
                 if param == 0 {
                     push!(codegen, "i64 %0");
@@ -125,23 +124,19 @@ impl<'a> Codegen<'a> {
     }
 
     fn generate(&mut self) {
-        for static_ in self.statics {
-            pushln!(
-                self,
-                "@{RASM_PREFIX}{} = internal global i64 0, align 8",
-                static_.name
-            );
+        for static_ in self.statics.values() {
+            pushln!(self, "@{} = internal global i64 0, align 8", static_.path());
         }
         pushln!(self);
 
-        for (i, string) in self.strings.iter().enumerate() {
-            push!(self, "@str{i} = constant [{} x i8] c\"", string.len() + 1);
+        for (id, string) in self.strings {
+            push!(self, "@str{id} = constant [{} x i8] c\"", string.len() + 1);
             self.escaped_chars(string);
             pushln!(self, "\\00\", align 1");
         }
         pushln!(self);
 
-        for function in self.functions {
+        for function in self.functions.values() {
             self.function(function);
         }
 
@@ -153,13 +148,13 @@ impl<'a> Codegen<'a> {
 
         let stack_locals = self
             .statics
-            .iter()
+            .values()
             .map(|s| s.stack_locals)
             .max()
             .unwrap_or(0);
         let transient_locals = self
             .statics
-            .iter()
+            .values()
             .map(|s| s.transient_locals)
             .max()
             .unwrap_or(0);
@@ -173,25 +168,26 @@ impl<'a> Codegen<'a> {
         pushln!(self, "  %x = call ptr @setlocale(i32 0, ptr @empty_str)");
 
         for static_id in self.init_order {
-            let static_ = &self.statics[*static_id];
+            let static_ = &self.statics[static_id];
             let value = self.expr(&static_.expr);
             pushln!(
                 self,
-                "  store i64 %v{value}, ptr @{RASM_PREFIX}{}, align 8",
-                static_.name
+                "  store i64 %v{value}, ptr @{}, align 8",
+                static_.path()
             );
         }
 
-        let main = self.functions.iter().find(|f| f.name == "main").unwrap();
+        let main = self.functions.values().find(|f| f.name == "main").unwrap();
 
         if main.params.is_empty() {
-            pushln!(self, "  %mr = call i64 @{RASM_PREFIX}main()");
+            pushln!(self, "  %mr = call i64 @{}()", main.path());
         } else {
             pushln!(self, "  %argc = sext i32 %0 to i64");
             pushln!(self, "  %argv = ptrtoint ptr %1 to i64");
             pushln!(
                 self,
-                "  %mr = call i64 @{RASM_PREFIX}main(i64 %argc, i64 %argv)"
+                "  %mr = call i64 @{}(i64 %argc, i64 %argv)",
+                main.path()
             );
         }
 
@@ -201,7 +197,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn function(&mut self, function: &Function) {
-        push!(self, "define i64 @{RASM_PREFIX}{}(", function.name);
+        push!(self, "define i64 @{}(", function.path());
         for param in 0..function.params.len() {
             if param == 0 {
                 push!(self, "i64 %p0");
@@ -304,8 +300,8 @@ impl<'a> Codegen<'a> {
         let id = self.next_id();
         pushln!(
             self,
-            "  %v{id} = load i64, ptr @{RASM_PREFIX}{}, align 8",
-            self.statics[static_id].name
+            "  %v{id} = load i64, ptr @{}, align 8",
+            self.statics[&static_id].path()
         );
         id
     }
@@ -313,25 +309,17 @@ impl<'a> Codegen<'a> {
     fn store_static(&mut self, static_id: StaticId, value: ValueId) {
         pushln!(
             self,
-            "  store i64 %v{value}, ptr @{RASM_PREFIX}{}, align 8",
-            self.statics[static_id].name
+            "  store i64 %v{value}, ptr @{}, align 8",
+            self.statics[&static_id].path()
         );
-    }
-
-    fn function_name(&self, function_id: FunctionId) -> &'a str {
-        if let Some(builtin) = BUILTIN_FUNCTIONS.get(function_id) {
-            builtin.name
-        } else {
-            &self.functions[function_id - BUILTIN_FUNCTIONS.len()].name
-        }
     }
 
     fn function_ref(&mut self, function_id: FunctionId) -> ValueId {
         let id = self.next_id();
         pushln!(
             self,
-            "  %v{id} = ptrtoint ptr @{RASM_PREFIX}{} to i64",
-            self.function_name(function_id)
+            "  %v{id} = ptrtoint ptr @{} to i64",
+            self.functions[&function_id].path()
         );
         id
     }
@@ -362,8 +350,8 @@ impl<'a> Codegen<'a> {
                 let id = self.next_id();
                 pushln!(
                     self,
-                    "  %v{id} = ptrtoint ptr @{RASM_PREFIX}{} to i64",
-                    self.statics[*static_id].name
+                    "  %v{id} = ptrtoint ptr @{} to i64",
+                    self.statics[static_id].path()
                 );
                 id
             }
@@ -765,7 +753,7 @@ impl<'a> Codegen<'a> {
     fn escaped_chars(&mut self, str: &str) {
         for &byte in str.as_bytes() {
             if matches!(byte, b' ' | b'!' | b'#'..=b'[' | b']'..=b'~') {
-                self.llvm.push(byte.try_into().unwrap());
+                self.code.push(byte.try_into().unwrap());
             } else {
                 push!(self, "\\{:02x}", byte);
             }

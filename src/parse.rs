@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -106,7 +106,6 @@ impl<'a> Parser<'a> {
         Ok(Name {
             name: token.span.text.to_string(),
             span: token.span,
-            variable_id: None,
         })
     }
 
@@ -151,6 +150,7 @@ impl<'a> Parser<'a> {
                     name,
                     params,
                     block,
+                    id: None,
                 })
             }
             TokenKind::Let => {
@@ -159,14 +159,18 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Assign)?;
                 let expr = self.expr(BindingPower::Start, false)?;
                 self.expect(TokenKind::Semi)?;
-                Ok(Item::Static { name, expr })
+                Ok(Item::Static {
+                    name,
+                    expr,
+                    id: None,
+                })
             }
             TokenKind::Mod => {
                 self.expect(TokenKind::Mod)?;
                 let name = self.name()?;
                 self.expect(TokenKind::Semi)?;
                 Ok(Item::Mod {
-                    items: parse_mod(&self.lexer.path, &name, &self.paths)?,
+                    items: parse_mod(self.lexer.path, &name, &self.paths)?,
                     name,
                 })
             }
@@ -181,7 +185,11 @@ impl<'a> Parser<'a> {
                 };
                 let tree = self.use_tree()?;
                 self.expect(TokenKind::Semi)?;
-                Ok(Item::Use { with_crate, tree })
+                Ok(Item::Use {
+                    with_crate,
+                    tree,
+                    done: Cell::new(false),
+                })
             }
             _ => Err(Error::new(
                 self.peek().span,
@@ -315,6 +323,7 @@ impl<'a> Parser<'a> {
                     with_crate: false,
                     prefix,
                     name,
+                    variable: None,
                 }
             }
             TokenKind::Crate => {
@@ -325,6 +334,7 @@ impl<'a> Parser<'a> {
                     with_crate: true,
                     prefix,
                     name,
+                    variable: None,
                 }
             }
             TokenKind::LeftBrace => Expr::Block(self.block(allow_return)?),

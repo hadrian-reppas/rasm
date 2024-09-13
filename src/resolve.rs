@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
 use crate::{ast, resolved};
 
@@ -38,131 +37,403 @@ pub struct ModuleTree {
     modules: HashMap<String, ModuleTree>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Resolved {
-    pub functions: Vec<resolved::Function>,
-    pub statics: Vec<resolved::Static>,
-    pub strings: Vec<String>,
+impl ModuleTree {
+    fn contains(&self, name: &str) -> bool {
+        self.statics.contains_key(name)
+            || self.functions.contains_key(name)
+            || self.modules.contains_key(name)
+    }
 }
 
-pub fn resolve(items: Vec<ast::Item>) -> Result<Resolved, Error> {
-    let (static_names, function_names) = make_statics_and_functions(&items)?;
-    let mut statics = Vec::new();
-    let mut functions = Vec::new();
-    let mut strings = HashMap::new();
+struct Counter {
+    static_count: usize,
+    function_count: usize,
+}
 
-    for item in items {
-        match resolve_item(item, &static_names, &function_names, &mut strings)? {
-            resolved::Item::Static(static_) => statics.push(static_),
-            resolved::Item::Function(function) => functions.push(function),
+impl Counter {
+    fn new() -> Self {
+        Counter {
+            static_count: 0,
+            function_count: 0,
         }
     }
 
-    let mut strings: Vec<_> = strings.into_iter().collect();
-    strings.sort_by_key(|(_, id)| *id);
+    fn static_id(&mut self) -> StaticId {
+        let id = self.static_count;
+        self.static_count += 1;
+        id
+    }
 
-    if function_names.contains_key("main") {
-        Ok(Resolved {
-            functions,
-            statics,
-            strings: strings.into_iter().map(|(s, _)| s).collect(),
-        })
-    } else {
-        Err(Error::msg("no `main` function"))
+    fn function_id(&mut self) -> FunctionId {
+        let id = self.function_count;
+        self.function_count += 1;
+        id
     }
 }
 
-fn make_statics_and_functions(
-    items: &[ast::Item],
-) -> Result<(HashMap<String, StaticId>, HashMap<String, FunctionId>), Error> {
+#[derive(Debug)]
+struct GlobalContext<'a> {
+    statics: HashMap<String, StaticId>,
+    functions: HashMap<String, FunctionId>,
+    modules: HashMap<String, &'a ModuleTree>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Resolved {
+    pub functions: HashMap<FunctionId, resolved::Function>,
+    pub statics: HashMap<StaticId, resolved::Static>,
+    pub strings: HashMap<StringId, String>,
+}
+
+pub fn resolve(mut crates: HashMap<String, Vec<ast::Item>>) -> Result<Resolved, Error> {
+    let tree = make_full_module_tree(&mut crates)?;
+    if !tree["crate"].functions.contains_key("main") {
+        return Err(Error::msg("no `main` function"));
+    }
+
     let mut statics = HashMap::new();
-    let mut functions: HashMap<_, _> = BUILTIN_FUNCTIONS
+    let mut functions = HashMap::new();
+    let mut strings = HashMap::new();
+    for (name, items) in crates {
+        let mut prefix = vec![name.clone()];
+        let (crate_functions, crate_statics) =
+            resolve_items(&mut prefix, items, &tree[&name], &tree, &mut strings)?;
+        statics.extend(crate_statics);
+        functions.extend(crate_functions);
+    }
+
+    Ok(Resolved {
+        functions,
+        statics,
+        strings: strings.into_iter().map(|(s, id)| (id, s)).collect(),
+    })
+}
+
+fn resolve_items(
+    prefix: &mut Vec<String>,
+    items: Vec<ast::Item>,
+    tree: &ModuleTree,
+    full_tree: &HashMap<String, ModuleTree>,
+    strings: &mut HashMap<String, StringId>,
+) -> Result<
+    (
+        HashMap<FunctionId, resolved::Function>,
+        HashMap<StaticId, resolved::Static>,
+    ),
+    Error,
+> {
+    let global_context = make_global_context(&items, tree, full_tree)?;
+    let mut functions = HashMap::new();
+    let mut statics = HashMap::new();
+
+    for item in items {
+        match item {
+            ast::Item::Function {
+                name,
+                params,
+                block,
+                id,
+            } => {
+                functions.insert(
+                    id.unwrap(),
+                    resolve_function(
+                        prefix,
+                        name,
+                        &params,
+                        block,
+                        id.unwrap(),
+                        &global_context,
+                        strings,
+                    )?,
+                );
+            }
+            ast::Item::Static { name, expr, id } => {
+                statics.insert(
+                    id.unwrap(),
+                    resolve_static(prefix, name, expr, id.unwrap(), &global_context, strings)?,
+                );
+            }
+            ast::Item::Mod { name, items } => {
+                let tree = &tree.modules[&name.name];
+                prefix.push(name.name.clone());
+                let (mod_functions, mod_statics) =
+                    resolve_items(prefix, items, tree, full_tree, strings)?;
+                prefix.pop();
+                functions.extend(mod_functions);
+                statics.extend(mod_statics);
+            }
+            ast::Item::Use { .. } => {}
+        }
+    }
+
+    Ok((functions, statics))
+}
+
+fn resolve_function(
+    prefix: &[String],
+    name: ast::Name,
+    params: &[ast::Name],
+    mut block: ast::Block,
+    id: FunctionId,
+    context: &GlobalContext,
+    strings: &mut HashMap<String, StringId>,
+) -> Result<resolved::Function, Error> {
+    let mut resolver = Resolver::with_params(&params, context, strings)?;
+    resolver.visit_block(&mut block)?;
+    let params: Vec<_> = params
         .iter()
-        .map(|func| func.name.to_string())
-        .zip(0..)
+        .map(|param| resolver.convert_local_id(resolver.variable_stack[0][&param.name]))
+        .collect();
+
+    if name.name == "main" && prefix == ["crate"] && !params.is_empty() && params.len() != 2 {
+        Err(Error::new(name.span, "`main` must have 0 or 2 parameters"))
+    } else {
+        Ok(resolved::Function {
+            prefix: prefix.to_vec(),
+            name: name.name,
+            span: name.span,
+            id,
+            params,
+            block: resolver.convert_block(block)?,
+            transient_locals: resolver.transient_map.len(),
+            stack_locals: resolver.max_stack_locals,
+            static_dependencies: resolver.static_dependencies.into_iter().collect(),
+            function_dependencies: resolver.function_dependencies.into_iter().collect(),
+        })
+    }
+}
+
+fn resolve_static(
+    prefix: &[String],
+    name: ast::Name,
+    mut expr: ast::Expr,
+    id: StaticId,
+    context: &GlobalContext,
+    strings: &mut HashMap<String, StringId>,
+) -> Result<resolved::Static, Error> {
+    let mut resolver = Resolver::new(context, strings);
+    resolver.visit_expr(&mut expr)?;
+    Ok(resolved::Static {
+        prefix: prefix.to_vec(),
+        name: name.name,
+        span: name.span,
+        id,
+        expr: resolver.convert_expr(expr)?,
+        transient_locals: resolver.transient_map.len(),
+        stack_locals: resolver.max_stack_locals,
+        static_dependencies: resolver.static_dependencies.into_iter().collect(),
+        function_dependencies: resolver.function_dependencies.into_iter().collect(),
+    })
+}
+
+fn make_full_module_tree(
+    crates: &mut HashMap<String, Vec<ast::Item>>,
+) -> Result<HashMap<String, ModuleTree>, Error> {
+    let mut counter = Counter::new();
+    let mut tree = HashMap::new();
+    for (name, items) in crates {
+        tree.insert(name.clone(), make_module_tree(items, &mut counter)?);
+    }
+    Ok(tree)
+}
+
+fn make_module_tree(items: &mut [ast::Item], counter: &mut Counter) -> Result<ModuleTree, Error> {
+    let mut statics = HashMap::new();
+    let mut functions = HashMap::new();
+    let mut modules = HashMap::new();
+
+    for item in items {
+        match item {
+            ast::Item::Function { name, id, .. } => {
+                if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
+                    return Err(Error::new(
+                        name.span,
+                        format!("duplicate global `{}`", name.name),
+                    ));
+                }
+                let function_id = counter.function_id();
+                *id = Some(function_id);
+                functions.insert(name.name.to_string(), function_id);
+            }
+            ast::Item::Static { name, id, .. } => {
+                if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
+                    return Err(Error::new(
+                        name.span,
+                        format!("duplicate global `{}`", name.name),
+                    ));
+                }
+                let static_id = counter.static_id();
+                *id = Some(static_id);
+                statics.insert(name.name.to_string(), static_id);
+            }
+            ast::Item::Mod { name, items } => {
+                let tree = make_module_tree(items, counter)?;
+                modules.insert(name.name.to_string(), tree);
+            }
+            ast::Item::Use { .. } => {}
+        };
+    }
+
+    Ok(ModuleTree {
+        statics,
+        functions,
+        modules,
+    })
+}
+
+fn make_global_context<'a>(
+    items: &[ast::Item],
+    local_tree: &'a ModuleTree,
+    full_tree: &'a HashMap<String, ModuleTree>,
+) -> Result<GlobalContext<'a>, Error> {
+    let mut statics = local_tree.statics.clone();
+    let mut functions = local_tree.functions.clone();
+    let mut modules: HashMap<_, _> = full_tree
+        .iter()
+        .map(|(name, tree)| (name.to_string(), tree))
         .collect();
 
     for item in items {
-        let (name, is_function) = match item {
-            ast::Item::Function { name, .. } => (name, true),
-            ast::Item::Static { name, .. } => (name, false),
-            ast::Item::Mod { .. } => todo!(),
-            ast::Item::Use { .. } => todo!(),
-        };
-
-        if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
-            return Err(Error::new(
-                name.span,
-                format!("duplicate global `{}`", name.name),
-            ));
-        }
-
-        if is_function {
-            functions.insert(name.name.to_string(), functions.len());
-        } else {
-            statics.insert(name.name.to_string(), statics.len());
+        if let ast::Item::Mod { name, .. } = item {
+            if modules.contains_key(&name.name) {
+                return Err(Error::new(
+                    name.span,
+                    format!("duplicate module `{}`", name.name),
+                ));
+            }
+            modules.insert(name.name.to_string(), &local_tree.modules[&name.name]);
         }
     }
-    Ok((statics, functions))
-}
 
-fn resolve_item(
-    item: ast::Item,
-    statics: &HashMap<String, StaticId>,
-    functions: &HashMap<String, FunctionId>,
-    strings: &mut HashMap<String, StringId>,
-) -> Result<resolved::Item, Error> {
-    match item {
-        ast::Item::Function {
-            name,
-            params,
-            mut block,
-        } => {
-            let mut resolver = Resolver::with_params(&params, statics, functions, strings)?;
-            resolver.visit_block(&mut block)?;
-            let params: Vec<_> = params
-                .iter()
-                .map(|param| resolver.convert_local_id(resolver.variable_stack[0][&param.name]))
-                .collect();
+    loop {
+        let mut first_unresolved_use = None;
+        let mut resolved_this_round = false;
 
-            if name.name == "main" && !params.is_empty() && params.len() != 2 {
-                Err(Error::new(name.span, "`main` must have 0 or 2 parameters"))
-            } else {
-                Ok(resolved::Item::Function(resolved::Function {
-                    name: name.name.to_string(),
-                    span: name.span,
-                    id: functions[&name.name],
-                    params,
-                    block: resolver.convert_block(block)?,
-                    transient_locals: resolver.transient_map.len(),
-                    stack_locals: resolver.max_stack_locals,
-                    static_dependencies: resolver.static_dependencies.into_iter().collect(),
-                    function_dependencies: resolver.function_dependencies.into_iter().collect(),
-                }))
+        for item in items {
+            if let ast::Item::Use {
+                with_crate,
+                tree,
+                done,
+            } = item
+            {
+                if done.get() {
+                    continue;
+                }
+
+                let module = if *with_crate {
+                    &full_tree["crate"]
+                } else if let Some(module) = modules.get(&tree.prefix[0].name) {
+                    module
+                } else {
+                    if first_unresolved_use.is_none() {
+                        first_unresolved_use = Some(tree.prefix[0].span);
+                    }
+                    continue;
+                };
+
+                let skip = usize::from(!*with_crate);
+                update_context(
+                    tree,
+                    module,
+                    skip,
+                    &mut statics,
+                    &mut functions,
+                    &mut modules,
+                )?;
+
+                resolved_this_round = true;
+                done.set(true);
             }
         }
-        ast::Item::Static { name, mut expr } => {
-            let mut resolver = Resolver::new(statics, functions, strings);
-            resolver.visit_expr(&mut expr)?;
-            Ok(resolved::Item::Static(resolved::Static {
-                name: name.name.to_string(),
-                span: name.span,
-                id: statics[&name.name],
-                expr: resolver.convert_expr(expr)?,
-                transient_locals: resolver.transient_map.len(),
-                stack_locals: resolver.max_stack_locals,
-                static_dependencies: resolver.static_dependencies.into_iter().collect(),
-                function_dependencies: resolver.function_dependencies.into_iter().collect(),
-            }))
+
+        if let Some(unresolved_use) = first_unresolved_use {
+            if !resolved_this_round {
+                return Err(Error::new(
+                    unresolved_use,
+                    format!("no module `{}`", unresolved_use.text),
+                ));
+            }
+        } else {
+            break;
         }
-        ast::Item::Mod { .. } => todo!(),
-        ast::Item::Use { .. } => todo!(),
     }
+
+    Ok(GlobalContext {
+        statics,
+        functions,
+        modules,
+    })
+}
+
+fn update_context<'a>(
+    tree: &ast::UseTree,
+    mut module: &'a ModuleTree,
+    skip: usize,
+    statics: &mut HashMap<String, StaticId>,
+    functions: &mut HashMap<String, FunctionId>,
+    modules: &mut HashMap<String, &'a ModuleTree>,
+) -> Result<(), Error> {
+    match &tree.kind {
+        ast::UseTreeKind::Simple => {
+            for (i, name) in tree.prefix.iter().enumerate().skip(skip) {
+                if i == tree.prefix.len() - 1 {
+                    if !module.contains(&name.name) {
+                        return Err(Error::new(
+                            name.span,
+                            format!("no `{}` in module", name.name),
+                        ));
+                    }
+                    if let Some(static_id) = module.statics.get(&name.name) {
+                        if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
+                            return Err(Error::new(
+                                name.span,
+                                format!("duplicate global `{}`", name.name),
+                            ));
+                        }
+                        statics.insert(name.name.to_string(), *static_id);
+                    } else if let Some(function_id) = module.functions.get(&name.name) {
+                        if statics.contains_key(&name.name) || functions.contains_key(&name.name) {
+                            return Err(Error::new(
+                                name.span,
+                                format!("duplicate global `{}`", name.name),
+                            ));
+                        }
+                        functions.insert(name.name.to_string(), *function_id);
+                    }
+                    if let Some(module) = module.modules.get(&name.name) {
+                        if modules.contains_key(&name.name) {
+                            return Err(Error::new(
+                                name.span,
+                                format!("duplicate module `{}`", name.name),
+                            ));
+                        }
+                        modules.insert(name.name.to_string(), module);
+                    }
+                } else {
+                    module = module.modules.get(&name.name).ok_or_else(|| {
+                        Error::new(name.span, format!("no module `{}`", name.name))
+                    })?;
+                }
+            }
+        }
+        ast::UseTreeKind::Nested(nested) => {
+            for name in tree.prefix.iter().skip(skip) {
+                module = module
+                    .modules
+                    .get(&name.name)
+                    .ok_or_else(|| Error::new(name.span, format!("no module `{}`", name.name)))?;
+            }
+
+            for tree in nested {
+                update_context(tree, module, 0, statics, functions, modules)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 struct Resolver<'a> {
-    statics: &'a HashMap<String, StaticId>,
-    functions: &'a HashMap<String, FunctionId>,
+    context: &'a GlobalContext<'a>,
     strings: &'a mut HashMap<String, StringId>,
     variable_stack: Vec<HashMap<String, LocalId>>,
     local_map: HashMap<LocalId, LocalWip>,
@@ -175,14 +446,9 @@ struct Resolver<'a> {
 }
 
 impl<'a> Resolver<'a> {
-    fn new(
-        statics: &'a HashMap<String, StaticId>,
-        functions: &'a HashMap<String, FunctionId>,
-        strings: &'a mut HashMap<String, StringId>,
-    ) -> Self {
+    fn new(context: &'a GlobalContext<'a>, strings: &'a mut HashMap<String, StringId>) -> Self {
         Resolver {
-            statics,
-            functions,
+            context,
             strings,
             variable_stack: Vec::new(),
             local_map: HashMap::new(),
@@ -197,8 +463,7 @@ impl<'a> Resolver<'a> {
 
     fn with_params(
         params: &[ast::Name],
-        statics: &'a HashMap<String, StaticId>,
-        functions: &'a HashMap<String, FunctionId>,
+        context: &'a GlobalContext<'a>,
         strings: &'a mut HashMap<String, StringId>,
     ) -> Result<Self, Error> {
         let mut param_map = HashMap::new();
@@ -213,8 +478,7 @@ impl<'a> Resolver<'a> {
         }
 
         Ok(Resolver {
-            statics,
-            functions,
+            context,
             strings,
             variable_stack: vec![param_map],
             local_map: (0..params.len())
@@ -252,17 +516,67 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn resolve(&mut self, name: &ast::Name) -> Result<Variable, Error> {
+    fn resolve(
+        &mut self,
+        with_crate: bool,
+        prefix: &[ast::Name],
+        name: &ast::Name,
+    ) -> Result<Variable, Error> {
+        if prefix.is_empty() {
+            self.resolve_simple(name)
+        } else {
+            self.resolve_qualified(with_crate, prefix, name)
+        }
+    }
+
+    fn resolve_simple(&mut self, name: &ast::Name) -> Result<Variable, Error> {
         for frame in self.variable_stack.iter().rev() {
             if let Some(id) = frame.get(&name.name) {
                 return Ok(Variable::Local(*id));
             }
         }
 
-        if let Some(static_id) = self.statics.get(&name.name) {
+        if let Some(static_id) = self.context.statics.get(&name.name) {
             self.static_dependencies.insert(*static_id);
             Ok(Variable::Static(*static_id))
-        } else if let Some(function_id) = self.functions.get(&name.name) {
+        } else if let Some(function_id) = self.context.functions.get(&name.name) {
+            self.function_dependencies.insert(*function_id);
+            Ok(Variable::Function(*function_id))
+        } else {
+            Err(Error::new(
+                name.span,
+                format!("no variable `{}`", name.name),
+            ))
+        }
+    }
+
+    fn resolve_qualified(
+        &mut self,
+        with_crate: bool,
+        prefix: &[ast::Name],
+        name: &ast::Name,
+    ) -> Result<Variable, Error> {
+        let mut module = if with_crate {
+            self.context.modules["crate"]
+        } else {
+            self.context
+                .modules
+                .get(&prefix[0].name)
+                .ok_or_else(|| Error::new(prefix[0].span, format!("no module `{}`", name.name)))?
+        };
+
+        let skip = usize::from(!with_crate);
+        for name in prefix.iter().skip(skip) {
+            module = module
+                .modules
+                .get(&name.name)
+                .ok_or_else(|| Error::new(name.span, format!("no module `{}`", name.name)))?;
+        }
+
+        if let Some(static_id) = module.statics.get(&name.name) {
+            self.static_dependencies.insert(*static_id);
+            Ok(Variable::Static(*static_id))
+        } else if let Some(function_id) = module.functions.get(&name.name) {
             self.function_dependencies.insert(*function_id);
             Ok(Variable::Function(*function_id))
         } else {
@@ -331,46 +645,46 @@ impl<'a> Resolver<'a> {
 
     fn visit_expr(&mut self, expr: &mut ast::Expr) -> Result<(), Error> {
         match expr {
-            ast::Expr::String(_) | ast::Expr::Int(_) => Ok(()),
+            ast::Expr::String(_) | ast::Expr::Int(_) => {}
             ast::Expr::Path {
                 with_crate,
                 prefix,
                 name,
-            } => self.visit_name(name), // FIXME
-            ast::Expr::Block(block) => self.visit_block(block),
+                variable,
+            } => *variable = Some(self.resolve(*with_crate, prefix, name)?),
+            ast::Expr::Block(block) => self.visit_block(block)?,
             ast::Expr::AddrOf(expr) => {
                 if let ast::PlaceExpr::Path {
                     with_crate,
                     prefix,
                     name,
+                    ..
                 } = expr
                 {
-                    // FIXME
-                    if let Variable::Local(id) = self.resolve(name)? {
+                    if let Variable::Local(id) = self.resolve(*with_crate, prefix, name)? {
                         self.ensure_on_stack(id);
                     }
                 }
-                self.visit_place_expr(expr)
+                self.visit_place_expr(expr)?;
             }
             ast::Expr::Binary { lhs, rhs, .. } => {
                 self.visit_expr(lhs)?;
-                self.visit_expr(rhs)
+                self.visit_expr(rhs)?;
             }
-            ast::Expr::Unary { expr, .. } => self.visit_expr(expr),
+            ast::Expr::Unary { expr, .. } => self.visit_expr(expr)?,
             ast::Expr::Assign { target, rhs } | ast::Expr::AssignOp { target, rhs, .. } => {
                 self.visit_place_expr(target)?;
-                self.visit_expr(rhs)
+                self.visit_expr(rhs)?;
             }
             ast::Expr::Index { target, index } => {
                 self.visit_expr(target)?;
-                self.visit_expr(index)
+                self.visit_expr(index)?;
             }
             ast::Expr::Call { func, args } => {
                 self.visit_expr(func)?;
                 for arg in args {
                     self.visit_expr(arg)?;
                 }
-                Ok(())
             }
             ast::Expr::If {
                 test,
@@ -382,13 +696,10 @@ impl<'a> Resolver<'a> {
                 if let Some(else_block) = else_block {
                     self.visit_block(else_block)?;
                 }
-                Ok(())
             }
             ast::Expr::Return(expr) => {
                 if let Some(expr) = expr {
-                    self.visit_expr(expr)
-                } else {
-                    Ok(())
+                    self.visit_expr(expr)?;
                 }
             }
             ast::Expr::For {
@@ -418,13 +729,8 @@ impl<'a> Resolver<'a> {
                 }
                 self.visit_block(block)?;
                 self.exit_block();
-                Ok(())
             }
         }
-    }
-
-    fn visit_name(&mut self, name: &mut ast::Name) -> Result<(), Error> {
-        name.variable_id = Some(self.resolve(name)?);
         Ok(())
     }
 
@@ -434,13 +740,15 @@ impl<'a> Resolver<'a> {
                 with_crate,
                 prefix,
                 name,
-            } => self.visit_name(name), // FIXME
-            ast::PlaceExpr::Deref(expr) => self.visit_expr(expr),
+                variable,
+            } => *variable = Some(self.resolve(*with_crate, prefix, name)?),
+            ast::PlaceExpr::Deref(expr) => self.visit_expr(expr)?,
             ast::PlaceExpr::Index { target, index } => {
                 self.visit_expr(target)?;
-                self.visit_expr(index)
+                self.visit_expr(index)?;
             }
         }
+        Ok(())
     }
 
     fn convert_block(&mut self, block: ast::Block) -> Result<resolved::Block, Error> {
@@ -475,21 +783,14 @@ impl<'a> Resolver<'a> {
                 }
             }
             ast::Expr::Int(int) => Ok(resolved::Expr::Int(int)),
-            ast::Expr::Path {
-                with_crate,
-                prefix,
-                name,
-            } => {
-                // FIXME
-                match name.variable_id.unwrap() {
-                    Variable::Static(id) => Ok(resolved::Expr::Static(id)),
-                    Variable::Function(id) => Ok(resolved::Expr::Function(id)),
-                    Variable::Local(id) => match self.convert_local_id(id) {
-                        Local::Stack(id) => Ok(resolved::Expr::Stack(id)),
-                        Local::Transient(id) => Ok(resolved::Expr::Transient(id)),
-                    },
-                }
-            }
+            ast::Expr::Path { variable, .. } => match variable.unwrap() {
+                Variable::Static(id) => Ok(resolved::Expr::Static(id)),
+                Variable::Function(id) => Ok(resolved::Expr::Function(id)),
+                Variable::Local(id) => match self.convert_local_id(id) {
+                    Local::Stack(id) => Ok(resolved::Expr::Stack(id)),
+                    Local::Transient(id) => Ok(resolved::Expr::Transient(id)),
+                },
+            },
             ast::Expr::Block(block) => Ok(resolved::Expr::Block(self.convert_block(block)?)),
             ast::Expr::AddrOf(expr) => Ok(resolved::Expr::AddrOf(self.convert_addr_of_expr(expr)?)),
             ast::Expr::Binary { op, lhs, rhs } => Ok(resolved::Expr::Binary {
@@ -585,13 +886,8 @@ impl<'a> Resolver<'a> {
         expr: ast::PlaceExpr,
     ) -> Result<resolved::AssignTargetExpr, Error> {
         match expr {
-            ast::PlaceExpr::Path {
-                with_crate,
-                prefix,
-                name,
-            } => {
-                // FIXME
-                match name.variable_id.unwrap() {
+            ast::PlaceExpr::Path { name, variable, .. } => {
+                match variable.unwrap() {
                     Variable::Static(id) => Ok(resolved::AssignTargetExpr::Static(id)),
                     Variable::Function(_) => Err(Error::new(
                         name.span,
@@ -619,24 +915,17 @@ impl<'a> Resolver<'a> {
         expr: ast::PlaceExpr,
     ) -> Result<resolved::AddrOfExpr, Error> {
         match expr {
-            ast::PlaceExpr::Path {
-                with_crate,
-                prefix,
-                name,
-            } => {
-                // FIXME
-                match name.variable_id.unwrap() {
-                    Variable::Static(id) => Ok(resolved::AddrOfExpr::Static(id)),
-                    Variable::Function(_) => Err(Error::new(
-                        name.span,
-                        format!("`{}` is a function", name.name), // FIXME
-                    )),
-                    Variable::Local(id) => match self.convert_local_id(id) {
-                        Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
-                        Local::Transient(_) => unreachable!(),
-                    },
-                }
-            }
+            ast::PlaceExpr::Path { name, variable, .. } => match variable.unwrap() {
+                Variable::Static(id) => Ok(resolved::AddrOfExpr::Static(id)),
+                Variable::Function(_) => Err(Error::new(
+                    name.span,
+                    format!("`{}` is a function", name.name),
+                )),
+                Variable::Local(id) => match self.convert_local_id(id) {
+                    Local::Stack(id) => Ok(resolved::AddrOfExpr::Stack(id)),
+                    Local::Transient(_) => unreachable!(),
+                },
+            },
             ast::PlaceExpr::Deref(_) => unreachable!(),
             ast::PlaceExpr::Index { target, index } => Ok(resolved::AddrOfExpr::Index {
                 target: Box::new(self.convert_expr(*target)?),

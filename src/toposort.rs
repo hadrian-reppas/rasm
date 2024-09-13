@@ -1,33 +1,25 @@
 use std::collections::HashSet;
 
-use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
 use crate::resolve::{Resolved, StaticId};
 
 pub fn static_initialization_order(resolved: &Resolved) -> Result<Vec<StaticId>, Error> {
     let mut static_dependencies = vec![Vec::new(); resolved.statics.len()];
 
-    for static_ in &resolved.statics {
+    for static_ in resolved.statics.values() {
         let mut dependencies: HashSet<_> = static_.static_dependencies.iter().copied().collect();
-        let mut function_stack = static_.function_dependencies.clone();
-        let mut seen_functions: HashSet<_> =
-            static_.function_dependencies.iter().copied().collect();
+        let mut function_stack: Vec<_> = static_.function_dependencies.iter().copied().collect();
+        let mut seen_functions: HashSet<_> = static_.function_dependencies.clone();
 
         while let Some(function_id) = function_stack.pop() {
-            if function_id < BUILTIN_FUNCTIONS.len() {
-                continue;
-            }
-
             dependencies.extend(
-                resolved.functions[function_id - BUILTIN_FUNCTIONS.len()]
+                resolved.functions[&function_id]
                     .static_dependencies
                     .iter()
                     .copied(),
             );
 
-            for id in
-                &resolved.functions[function_id - BUILTIN_FUNCTIONS.len()].function_dependencies
-            {
+            for id in &resolved.functions[&function_id].function_dependencies {
                 if !seen_functions.contains(id) {
                     function_stack.push(*id);
                     seen_functions.insert(*id);
