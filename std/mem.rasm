@@ -1,0 +1,16 @@
+fn load_byte(ptr) {
+	let base = ptr & ~7;
+	let offset = ptr & 7;
+	(*base >> 8 * offset) & 255
+}
+
+fn store_byte(ptr, byte) {
+	let base = ptr & ~7;
+	let offset = ptr & 7;
+	let old = *base;
+
+	let mask = ~(255 << 8 * offset);
+	let shifted = byte << 8 * offset;
+	let new = old & mask | shifted;
+	*base = new;
+}
