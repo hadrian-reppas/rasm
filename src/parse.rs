@@ -169,9 +169,15 @@ impl<'a> Parser<'a> {
                     done: Cell::new(false),
                 })
             }
+            TokenKind::Intrinsic => {
+                self.expect(TokenKind::Intrinsic)?;
+                let name = self.name()?;
+                self.expect(TokenKind::Semi)?;
+                Ok(Item::Intrinsic { name, id: None })
+            }
             _ => Err(Error::new(
                 self.peek().span,
-                "expected `fn`, `let`, `use` or `mod`",
+                "expected `fn`, `let`, `use`, `mod` or `intrinsic`",
             )),
         }
     }

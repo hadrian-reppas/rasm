@@ -6,7 +6,6 @@ use std::process::{Command, ExitCode};
 use clap::Parser;
 
 mod ast;
-mod builtins;
 mod codegen;
 mod error;
 mod io;

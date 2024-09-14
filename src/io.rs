@@ -11,6 +11,8 @@ lazy_static::lazy_static! {
         (["util.rasm"].as_slice(), include_str!("../std/util.rasm")),
         (["cstr.rasm"].as_slice(), include_str!("../std/cstr.rasm")),
         (["mem.rasm"].as_slice(), include_str!("../std/mem.rasm")),
+        (["alloc.rasm"].as_slice(), include_str!("../std/alloc.rasm")),
+        (["intrinsics.rasm"].as_slice(), include_str!("../std/intrinsics.rasm")),
     ]);
 }
 
@@ -76,5 +78,9 @@ impl SourcePath {
                 }
             }
         }
+    }
+
+    pub fn is_std(self) -> bool {
+        matches!(self, SourcePath::Std(_))
     }
 }

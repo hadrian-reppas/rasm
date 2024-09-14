@@ -4,28 +4,11 @@ use std::{fmt::Write as _, io::Write as _};
 use tempfile::NamedTempFile;
 
 use crate::ast::{AssignOp, BinaryOp, UnaryOp};
-use crate::builtins::BUILTIN_FUNCTIONS;
 use crate::error::Error;
 use crate::resolve::{FunctionId, Local, Resolved, StackId, StaticId, StringId, TransientId};
 use crate::resolved::{AddrOfExpr, AssignTargetExpr, Block, Expr, Function, Static};
 
-const PRELUDE: &str = r#"
-@__stdoutp = external global ptr, align 8
-@__stdinp = external global ptr, align 8
-
-declare i32 @printf(ptr, ...)
-declare i64 @getline(ptr, ptr, ptr)
-declare ptr @malloc(i64)
-declare void @free(ptr)
-declare ptr @setlocale(i32, ptr)
-declare i32 @fflush(ptr)
-
-@percent_lc = constant [4 x i8] c"%lc\00", align 1
-@percent_ld = constant [4 x i8] c"%ld\00", align 1
-@percent_s = constant [3 x i8] c"%s\00", align 1
-@empty_str = constant [1 x i8] c"\00", align 1
-
-"#;
+const PRELUDE: &str = include_str!("prelude.ll");
 
 pub fn generate(resolved: &Resolved, init_order: &[StaticId]) -> Result<NamedTempFile, Error> {
     let mut codegen = Codegen::new(
@@ -87,7 +70,7 @@ impl<'a> Codegen<'a> {
         strings: &'a HashMap<StringId, String>,
         init_order: &'a [StaticId],
     ) -> Self {
-        let mut codegen = Codegen {
+        Codegen {
             code: PRELUDE.to_string(),
             functions,
             statics,
@@ -95,21 +78,7 @@ impl<'a> Codegen<'a> {
             init_order,
             id_counter: 1,
             current_block: 0,
-        };
-
-        for builtin in BUILTIN_FUNCTIONS {
-            push!(codegen, "define i64 @std.intrinsic.{}(", builtin.name);
-            for param in 0..builtin.params {
-                if param == 0 {
-                    push!(codegen, "i64 %0");
-                } else {
-                    push!(codegen, ", i64 %{param}");
-                }
-            }
-            pushln!(codegen, ") {}\n", builtin.body);
         }
-
-        codegen
     }
 
     fn next_id(&mut self) -> usize {
@@ -137,7 +106,9 @@ impl<'a> Codegen<'a> {
         pushln!(self);
 
         for function in self.functions.values() {
-            self.function(function);
+            if !function.is_intrinsic {
+                self.function(function);
+            }
         }
 
         self.main();

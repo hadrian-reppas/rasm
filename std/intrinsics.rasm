@@ -1,0 +1,9 @@
+intrinsic putc;
+intrinsic putcln;
+intrinsic putd;
+intrinsic putdln;
+intrinsic puts;
+intrinsic putsln;
+
+intrinsic alloc;
+intrinsic free;

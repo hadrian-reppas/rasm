@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::ast::{AssignOp, BinaryOp, UnaryOp};
+use crate::ast::{self, AssignOp, BinaryOp, UnaryOp};
 use crate::error::Span;
 use crate::resolve::{FunctionId, Local, StackId, StaticId, StringId, TransientId};
 
@@ -10,6 +10,7 @@ pub struct Function {
     pub name: String,
     pub span: Span,
     pub id: FunctionId,
+    pub is_intrinsic: bool,
     pub params: Vec<Local>,
     pub block: Block,
     pub transient_locals: usize,
@@ -24,6 +25,25 @@ impl Function {
         path.push('.');
         path.push_str(&self.name);
         path
+    }
+
+    pub fn intrinsic(prefix: Vec<String>, name: ast::Name, id: FunctionId) -> Self {
+        Function {
+            prefix,
+            name: name.name,
+            span: name.span,
+            id,
+            is_intrinsic: true,
+            params: Vec::new(),
+            block: Block {
+                stmts: Vec::new(),
+                expr: None,
+            },
+            transient_locals: 0,
+            stack_locals: 0,
+            static_dependencies: HashSet::new(),
+            function_dependencies: HashSet::new(),
+        }
     }
 }
 

@@ -1,0 +1,3 @@
+fn alloc() {}
+fn free() {}
+fn realloc() {}

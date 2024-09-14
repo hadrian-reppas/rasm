@@ -25,6 +25,10 @@ pub enum Item {
         tree: UseTree,
         done: Cell<bool>,
     },
+    Intrinsic {
+        name: Name,
+        id: Option<FunctionId>,
+    },
 }
 
 #[derive(Debug, Clone)]
