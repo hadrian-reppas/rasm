@@ -115,14 +115,18 @@ impl<'a> Parser<'a> {
                     self.expect(TokenKind::RightParen)?;
                     Vec::new()
                 } else {
-                    let mut params = vec![self.name()?];
+                    let mut params = vec![self.param()?];
                     while self.peek().kind == TokenKind::Comma {
                         self.expect(TokenKind::Comma)?;
-                        params.push(self.name()?);
+                        params.push(self.param()?);
                     }
                     self.expect(TokenKind::RightParen)?;
                     params
                 };
+                if self.peek().kind == TokenKind::Arrow {
+                    self.expect(TokenKind::Arrow)?;
+                    self.ty()?;
+                }
                 let block = self.block(true)?;
                 Ok(Item::Function {
                     name,
@@ -133,7 +137,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Let => {
                 self.expect(TokenKind::Let)?;
-                let name = self.name()?;
+                let name = self.param()?;
                 self.expect(TokenKind::Assign)?;
                 let expr = self.expr(BindingPower::Start, false)?;
                 self.expect(TokenKind::Semi)?;
@@ -182,6 +186,62 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn param(&mut self) -> Result<Name, Error> {
+        let name = self.name();
+        if self.peek().kind == TokenKind::Colon {
+            self.expect(TokenKind::Colon)?;
+            self.ty()?;
+        }
+        name
+    }
+
+    fn ty(&mut self) -> Result<(), Error> {
+        match self.peek().kind {
+            TokenKind::Name => {
+                self.expect(TokenKind::Name)?;
+                if self.peek().kind == TokenKind::LeftBrack {
+                    self.expect(TokenKind::LeftBrack)?;
+                    if self.peek().kind == TokenKind::RightBrack {
+                        self.expect(TokenKind::RightBrack)?;
+                        return Ok(());
+                    }
+
+                    self.ty()?;
+                    while self.peek().kind == TokenKind::Comma {
+                        self.expect(TokenKind::Comma)?;
+                        self.ty()?;
+                    }
+                    self.expect(TokenKind::RightBrack)?;
+                }
+                Ok(())
+            }
+            TokenKind::Star => {
+                self.expect(TokenKind::Star)?;
+                self.ty()
+            }
+            TokenKind::Fn => {
+                self.expect(TokenKind::Fn)?;
+                self.expect(TokenKind::LeftParen)?;
+                if self.peek().kind == TokenKind::RightParen {
+                    self.expect(TokenKind::RightParen)?;
+                } else {
+                    self.ty()?;
+                    while self.peek().kind == TokenKind::Comma {
+                        self.expect(TokenKind::Comma)?;
+                        self.ty()?;
+                    }
+                    self.expect(TokenKind::RightParen)?;
+                }
+                if self.peek().kind == TokenKind::Arrow {
+                    self.expect(TokenKind::Arrow)?;
+                    self.ty()?;
+                }
+                Ok(())
+            }
+            _ => Err(Error::new(self.peek().span, "expected type")),
+        }
+    }
+
     fn use_tree(&mut self) -> Result<UseTree, Error> {
         let mut prefix = vec![self.name()?];
         while self.peek().kind == TokenKind::ColonColon {
@@ -223,7 +283,7 @@ impl<'a> Parser<'a> {
             match self.peek().kind {
                 TokenKind::Let => {
                     self.expect(TokenKind::Let)?;
-                    let name = self.name()?;
+                    let name = self.param()?;
                     self.expect(TokenKind::Assign)?;
                     let expr = self.expr(BindingPower::Start, allow_return)?;
                     self.expect(TokenKind::Semi)?;
@@ -354,7 +414,7 @@ impl<'a> Parser<'a> {
                     }
                     TokenKind::Let => {
                         self.expect(TokenKind::Let)?;
-                        let name = self.name()?;
+                        let name = self.param()?;
                         self.expect(TokenKind::Assign)?;
                         let expr = self.expr(BindingPower::Start, allow_return)?;
                         self.expect(TokenKind::Semi)?;
