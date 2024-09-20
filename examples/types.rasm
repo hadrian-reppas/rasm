@@ -1,9 +1,9 @@
-let COUNT: i64 = 1;
-let HASH_MAP: hash_map[string, vec[i64]] = null;
+let COUNT: i64 = 2 >> 1;
+let HASH_MAP: HashMap<String, Vec<i64>> = null;
 
-fn map(data: vec[A], f: fn(A) -> B) -> vec[B] {}
+fn map(data: Vec<A>, f: fn(A) -> B) -> Vec<B> {}
 
-fn filter_map(data: vec[A], f: fn(A) -> option[B]) -> vec[B] {}
+fn filter_map(data: Vec<A>, f: fn(A) -> Option<B>) -> Vec<B> {}
 
 fn increment(p: *i64) {
 	*p += 1;
@@ -19,6 +19,6 @@ fn loop(start: i64, end) {
 fn main(argc: i64, argv: **u8) -> int {
 	let x = 0;
 	let y = &x;
-	*y += 1;
+	*y += 8 >>> 2;
 	x
 }

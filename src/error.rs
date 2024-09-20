@@ -11,6 +11,12 @@ pub struct Span {
     pub column: usize,
 }
 
+impl Span {
+    pub fn adjacent(self, other: Span) -> bool {
+        self.line == other.line && self.column + self.text.len() == other.column
+    }
+}
+
 #[derive(Debug)]
 pub struct Error {
     span: Span,

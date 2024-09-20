@@ -10,7 +10,9 @@ use crate::io::{load_source, SourcePath};
 use crate::lex::{Lexer, Token, TokenKind};
 
 struct Parser<'a> {
-    peek: Token,
+    peek0: Token,
+    peek1: Token,
+    peek2: Token,
     lexer: Lexer,
     paths: &'a RefCell<HashSet<SourcePath>>,
 }
@@ -51,19 +53,30 @@ impl<'a> Parser<'a> {
     ) -> Result<Self, Error> {
         let mut lexer = Lexer::new(code, path);
         Ok(Parser {
-            peek: lexer.next()?,
+            peek0: lexer.next()?,
+            peek1: lexer.next()?,
+            peek2: lexer.next()?,
             lexer,
             paths,
         })
     }
 
     fn peek(&self) -> Token {
-        self.peek
+        self.peek0
+    }
+
+    fn peek1(&self) -> Token {
+        self.peek1
+    }
+
+    fn peek2(&self) -> Token {
+        self.peek2
     }
 
     fn next(&mut self) -> Result<Token, Error> {
-        let next = self.peek;
-        self.peek = self.lexer.next()?;
+        let next;
+        (next, self.peek0, self.peek1, self.peek2) =
+            (self.peek0, self.peek1, self.peek2, self.lexer.next()?);
         Ok(next)
     }
 
@@ -76,7 +89,7 @@ impl<'a> Parser<'a> {
     }
 
     fn at_eof(&self) -> bool {
-        self.peek.kind == TokenKind::Eof
+        self.peek0.kind == TokenKind::Eof
     }
 
     fn name(&mut self) -> Result<Name, Error> {
@@ -199,10 +212,10 @@ impl<'a> Parser<'a> {
         match self.peek().kind {
             TokenKind::Name => {
                 self.expect(TokenKind::Name)?;
-                if self.peek().kind == TokenKind::LeftBrack {
-                    self.expect(TokenKind::LeftBrack)?;
-                    if self.peek().kind == TokenKind::RightBrack {
-                        self.expect(TokenKind::RightBrack)?;
+                if self.peek().kind == TokenKind::Lt {
+                    self.expect(TokenKind::Lt)?;
+                    if self.peek().kind == TokenKind::Gt {
+                        self.expect(TokenKind::Gt)?;
                         return Ok(());
                     }
 
@@ -211,7 +224,7 @@ impl<'a> Parser<'a> {
                         self.expect(TokenKind::Comma)?;
                         self.ty()?;
                     }
-                    self.expect(TokenKind::RightBrack)?;
+                    self.expect(TokenKind::Gt)?;
                 }
                 Ok(())
             }
@@ -484,7 +497,9 @@ impl<'a> Parser<'a> {
         while let Some(info) = self.peek_op(bp) {
             lhs = match info {
                 OpInfo::Binary(op, new_bp) => {
-                    self.next()?;
+                    for _ in 0..op.num_tokens() {
+                        self.next()?;
+                    }
                     let rhs = self.expr(new_bp, allow_return)?;
                     Expr::Binary {
                         op,
@@ -576,11 +591,23 @@ impl<'a> Parser<'a> {
             TokenKind::Plus => bop!(Add, Sum),
             TokenKind::Dash => bop!(Sub, Sum),
             TokenKind::Shl => bop!(Shl, Shift),
-            TokenKind::ArithmeticShr => bop!(ArithmeticShr, Shift),
-            TokenKind::LogicalShr => bop!(LogicalShr, Shift),
             TokenKind::Lt => bop!(Lt, Cmp),
             TokenKind::Le => bop!(Le, Cmp),
-            TokenKind::Gt => bop!(Gt, Cmp),
+            TokenKind::Gt => {
+                if self.peek1().kind == TokenKind::Gt
+                    && self.peek().span.adjacent(self.peek1().span)
+                    && self.peek2().kind == TokenKind::Gt
+                    && self.peek1().span.adjacent(self.peek2().span)
+                {
+                    bop!(LogicalShr, Shift)
+                } else if self.peek1().kind == TokenKind::Gt
+                    && self.peek().span.adjacent(self.peek1().span)
+                {
+                    bop!(ArithmeticShr, Shift)
+                } else {
+                    bop!(Gt, Cmp)
+                }
+            }
             TokenKind::Ge => bop!(Ge, Cmp),
             TokenKind::Eq => bop!(Eq, Eq),
             TokenKind::Ne => bop!(Ne, Eq),

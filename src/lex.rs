@@ -110,7 +110,6 @@ impl Lexer {
 
         symbol_tokens!(
             (">>>=", LogicalShrAssign),
-            (">>>", LogicalShr),
             ("<<=", ShlAssign),
             (">>=", ArithmeticShrAssign),
             ("+=", AddAssign),
@@ -124,7 +123,6 @@ impl Lexer {
             ("==", Eq),
             ("!=", Ne),
             ("<<", Shl),
-            (">>", ArithmeticShr),
             ("&&", AndAnd),
             ("||", OrOr),
             ("::", ColonColon),
@@ -329,8 +327,6 @@ pub enum TokenKind {
     Percent,
     Plus,
     Shl,
-    ArithmeticShr,
-    LogicalShr,
     Lt,
     Le,
     Gt,

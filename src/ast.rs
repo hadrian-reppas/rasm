@@ -170,6 +170,16 @@ pub enum BinaryOp {
     LogicalOr,
 }
 
+impl BinaryOp {
+    pub fn num_tokens(self) -> usize {
+        match self {
+            BinaryOp::LogicalShr => 3,
+            BinaryOp::ArithmeticShr => 2,
+            _ => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOp {
     Negate,
