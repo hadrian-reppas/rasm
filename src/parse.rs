@@ -92,6 +92,25 @@ impl<'a> Parser<'a> {
         self.peek0.kind == TokenKind::Eof
     }
 
+    fn sequence<T>(
+        &mut self,
+        parse_item: impl Fn(&mut Self) -> Result<T, Error>,
+        sep: TokenKind,
+        end: TokenKind,
+    ) -> Result<Vec<T>, Error> {
+        if self.peek().kind == end {
+            self.expect(end)?;
+            return Ok(Vec::new());
+        }
+        let mut items = vec![parse_item(self)?];
+        while self.peek().kind != end {
+            self.expect(sep)?;
+            items.push(parse_item(self)?);
+        }
+        self.expect(end)?;
+        Ok(items)
+    }
+
     fn name(&mut self) -> Result<Name, Error> {
         let token = self.expect(TokenKind::Name)?;
         Ok(Name {
@@ -124,18 +143,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Fn)?;
                 let name = self.name()?;
                 self.expect(TokenKind::LeftParen)?;
-                let params = if self.peek().kind == TokenKind::RightParen {
-                    self.expect(TokenKind::RightParen)?;
-                    Vec::new()
-                } else {
-                    let mut params = vec![self.param()?];
-                    while self.peek().kind == TokenKind::Comma {
-                        self.expect(TokenKind::Comma)?;
-                        params.push(self.param()?);
-                    }
-                    self.expect(TokenKind::RightParen)?;
-                    params
-                };
+                let params = self.sequence(Self::param, TokenKind::Comma, TokenKind::RightParen)?;
                 if self.peek().kind == TokenKind::Arrow {
                     self.expect(TokenKind::Arrow)?;
                     self.ty()?;
@@ -214,17 +222,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Name)?;
                 if self.peek().kind == TokenKind::Lt {
                     self.expect(TokenKind::Lt)?;
-                    if self.peek().kind == TokenKind::Gt {
-                        self.expect(TokenKind::Gt)?;
-                        return Ok(());
-                    }
-
-                    self.ty()?;
-                    while self.peek().kind == TokenKind::Comma {
-                        self.expect(TokenKind::Comma)?;
-                        self.ty()?;
-                    }
-                    self.expect(TokenKind::Gt)?;
+                    self.sequence(Self::ty, TokenKind::Comma, TokenKind::Gt)?;
                 }
                 Ok(())
             }
@@ -235,16 +233,7 @@ impl<'a> Parser<'a> {
             TokenKind::Fn => {
                 self.expect(TokenKind::Fn)?;
                 self.expect(TokenKind::LeftParen)?;
-                if self.peek().kind == TokenKind::RightParen {
-                    self.expect(TokenKind::RightParen)?;
-                } else {
-                    self.ty()?;
-                    while self.peek().kind == TokenKind::Comma {
-                        self.expect(TokenKind::Comma)?;
-                        self.ty()?;
-                    }
-                    self.expect(TokenKind::RightParen)?;
-                }
+                self.sequence(Self::ty, TokenKind::Comma, TokenKind::RightParen)?;
                 if self.peek().kind == TokenKind::Arrow {
                     self.expect(TokenKind::Arrow)?;
                     self.ty()?;
@@ -263,19 +252,8 @@ impl<'a> Parser<'a> {
                 prefix.push(self.name()?);
             } else {
                 self.expect(TokenKind::LeftBrace)?;
-                if self.peek().kind == TokenKind::RightBrace {
-                    self.expect(TokenKind::RightBrace)?;
-                    return Ok(UseTree {
-                        prefix,
-                        kind: UseTreeKind::Nested(Vec::new()),
-                    });
-                }
-                let mut nested = vec![self.use_tree()?];
-                while self.peek().kind != TokenKind::RightBrace {
-                    self.expect(TokenKind::Comma)?;
-                    nested.push(self.use_tree()?);
-                }
-                self.expect(TokenKind::RightBrace)?;
+                let nested =
+                    self.sequence(Self::use_tree, TokenKind::Comma, TokenKind::RightBrace)?;
                 return Ok(UseTree {
                     prefix,
                     kind: UseTreeKind::Nested(nested),
@@ -532,17 +510,11 @@ impl<'a> Parser<'a> {
                 }
                 OpInfo::Call => {
                     self.expect(TokenKind::LeftParen)?;
-                    let args = if self.peek().kind == TokenKind::RightParen {
-                        Vec::new()
-                    } else {
-                        let mut args = vec![self.expr(BindingPower::Start, allow_return)?];
-                        while self.peek().kind != TokenKind::RightParen {
-                            self.expect(TokenKind::Comma)?;
-                            args.push(self.expr(BindingPower::Start, allow_return)?);
-                        }
-                        args
-                    };
-                    self.expect(TokenKind::RightParen)?;
+                    let args = self.sequence(
+                        |parser| parser.expr(BindingPower::Start, allow_return),
+                        TokenKind::Comma,
+                        TokenKind::RightParen,
+                    )?;
                     Expr::Call {
                         func: Box::new(lhs),
                         args,
