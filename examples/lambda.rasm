@@ -1,0 +1,15 @@
+use std::{Vec, String};
+
+fn main() {
+	let vec: Vec<Vec<String>> = Vec::new();
+	Vec::free_with(vec, |v: Vec<String>| Vec::free_with(v, String::free));
+}
+
+// fn main() {
+//     let vec: Vec<Vec<String>> = Vec::new();
+//     Vec::free_with(vec, __anonymous0);
+// }
+//
+// fn __anonymous0(v) {
+//     Vec::free_with(v, String::free)
+// }

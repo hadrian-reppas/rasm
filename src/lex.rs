@@ -375,6 +375,7 @@ impl TokenKind {
                 | TokenKind::Bang
                 | TokenKind::Star
                 | TokenKind::And
+                | TokenKind::Or
         )
     }
 }

@@ -15,6 +15,7 @@ struct Parser<'a> {
     peek2: Token,
     lexer: Lexer,
     paths: &'a RefCell<HashSet<SourcePath>>,
+    lambdas: Vec<Item>,
 }
 
 pub fn parse(
@@ -58,6 +59,7 @@ impl<'a> Parser<'a> {
             peek2: lexer.next()?,
             lexer,
             paths,
+            lambdas: Vec::new(),
         })
     }
 
@@ -129,10 +131,23 @@ impl<'a> Parser<'a> {
         Ok((path, last))
     }
 
+    fn push_lambda(&mut self, name: Name, params: Vec<Name>, body: Expr) {
+        self.lambdas.push(Item::Function {
+            name,
+            params,
+            block: Block {
+                stmts: Vec::new(),
+                expr: Some(Box::new(body)),
+            },
+            id: None,
+        });
+    }
+
     fn items(&mut self) -> Result<Vec<Item>, Error> {
         let mut items = Vec::new();
         while !self.at_eof() {
             items.push(self.item()?);
+            items.append(&mut self.lambdas);
         }
         Ok(items)
     }
@@ -462,6 +477,22 @@ impl<'a> Parser<'a> {
                     Expr::AddrOf(place)
                 } else {
                     return Err(Error::new(and.span, "target is not a place expression"));
+                }
+            }
+            TokenKind::Or => {
+                let token = self.expect(TokenKind::Or)?;
+                let params = self.sequence(Self::param, TokenKind::Comma, TokenKind::Or)?;
+                let body = self.expr(BindingPower::Start, true)?;
+                let name = Name {
+                    name: format!("$lambda_{}_{}", token.span.line, token.span.column),
+                    span: token.span,
+                };
+                self.push_lambda(name.clone(), params, body);
+                Expr::Path {
+                    with_crate: false,
+                    prefix: Vec::new(),
+                    name,
+                    variable: None,
                 }
             }
             _ => {

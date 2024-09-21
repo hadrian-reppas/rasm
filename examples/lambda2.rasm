@@ -1,0 +1,9 @@
+let increment = |x| x + 1;
+
+fn map(f: fn(i64) -> i64, x) -> i64 {
+	f(x)
+}
+
+fn main() {
+	map(|x| x * increment(x), 4)
+}
